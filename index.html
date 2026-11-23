@@ -4,18 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Appel léger</title>
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
   body{margin:0;font-family:system-ui,sans-serif;background:#111;color:#eee;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px}
-  #box{position:relative;width:100%;max-width:480px}
-  video{width:100%;background:#000;border-radius:10px;display:block}
-  #me{width:110px;position:absolute;right:8px;top:8px;opacity:.9;border-radius:8px}
+  #box{position:relative;width:100%;max-width:720px}
+  video{width:100%;background:#000;border-radius:10px}
+  #me{position:absolute;right:12px;top:12px;width:120px;opacity:.9;border-radius:8px}
   input,button{font-size:16px;padding:10px;border-radius:8px;border:0}
   button{background:#e0457b;color:#fff;cursor:pointer}
-  #s{font-size:14px;opacity:.9;text-align:center}
-  #relay{font-size:13px}
-  #dbg{font-size:12px;opacity:.7}
-  #log{font-size:11px;font-family:monospace;opacity:.6;width:100%;max-width:480px;max-height:180px;overflow:auto;background:#000;padding:6px;border-radius:6px;white-space:pre-wrap}
+  #s{font-size:14px;opacity:.8;text-align:center}
+  #dbg{font-size:12px;opacity:.6}
+  #box:fullscreen{background:#000}
+  #box:fullscreen video{height:100vh;object-fit:contain;border-radius:0}
 </style>
 </head>
 <body>
@@ -24,122 +23,113 @@
     <button onclick="start('a')">Je lance l'appel</button>
     <button onclick="start('b')">Je rejoins</button>
   </div>
-
   <div id="s">Mettez le même code tous les deux.</div>
-  <div id="relay"></div>
+  <div id="relay" style="font-size:13px"></div>
   <div id="dbg"></div>
-
   <div id="box">
     <video id="remote" autoplay playsinline onclick="this.muted=false;this.play()"></video>
     <video id="me" autoplay playsinline muted></video>
   </div>
+  <div style="display:flex;gap:8px">
+    <button id="cam" onclick="toggleCam()" style="display:none">Couper la vidéo (audio seul)</button>
+    <button id="full" onclick="toggleFull()" style="display:none">Plein écran</button>
+  </div>
 
-  <button id="cam" style="display:none" onclick="toggleCam()">Couper la vidéo (audio seul)</button>
-  <div id="log"></div>
-
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-let stream, peer, call, connected = false, statsTimer = null;
+let stream, peer, call;
 
-// ====== CONFIG TURN (Metered) ======
-const ICE = [
-  { urls: "stun:stun.relay.metered.ca:80" },
-  { urls: "turn:global.relay.metered.ca:80",
-    username: "403d8a7db25a819098d7d8c9", credential: "go7c76Oi2qYbDGN1" },
-  { urls: "turn:global.relay.metered.ca:80?transport=tcp",
-    username: "403d8a7db25a819098d7d8c9", credential: "go7c76Oi2qYbDGN1" },
-  { urls: "turn:global.relay.metered.ca:443",
-    username: "403d8a7db25a819098d7d8c9", credential: "go7c76Oi2qYbDGN1" },
-  { urls: "turns:global.relay.metered.ca:443?transport=tcp",
-    username: "403d8a7db25a819098d7d8c9", credential: "go7c76Oi2qYbDGN1" }
+// === Relais TURN : Metered (remplis ton URL d'API si tu l'as) ===
+const TURN_API = '';
+const TURN_MANUAL = {
+  urls: 'turn:free.expressturn.com:3478,turn:free.expressturn.com:3478?transport=tcp',
+  username: '000000002110890657',
+  credential: 'bsEiTWwvTfHHRZ091mt4+Bq1omM='
+};
+
+let ICE = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' }
 ];
 
 function status(t){ $('s').textContent = t; }
-function log(t){
-  const d = new Date().toTimeString().slice(0,8);
-  $('log').textContent += d + ' ' + t + '\n';
-  $('log').scrollTop = $('log').scrollHeight;
-}
 
 async function start(role){
   const code = $('code').value.trim().toLowerCase().replace(/\W/g,'');
   if(code.length < 4) return status('Code trop court (4 caractères min).');
-
   try{
+    // Pas de contrainte de résolution ni de débit : WebRTC adapte tout seul
     stream = await navigator.mediaDevices.getUserMedia({
-      video:{width:{ideal:160},height:{ideal:120},frameRate:{ideal:8,max:10}},
+      video:{width:{ideal:640},height:{ideal:480},frameRate:{ideal:24,max:30}},
       audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}
     });
-  }catch(e){
-    return status('Caméra/micro refusés : ' + e.message);
-  }
+  }catch(e){ return status('Caméra/micro refusés : '+e.message); }
 
   $('me').srcObject = stream;
   $('join').style.display = 'none';
   $('cam').style.display = 'block';
-  log('TURN : Metered configuré');
+  $('full').style.display = 'block';
 
-  $('relay').textContent = 'Test du relais…';
-  const good = await testRelay();
-  $('relay').textContent = good
-    ? 'Relais : OK ✔'
-    : 'Relais : REFUSÉ ✘ (identifiants invalides ou port bloqué sur ce réseau)';
-  log('testRelay = ' + good);
+  if(TURN_API){
+    try{
+      status('Chargement du relais…');
+      const r = await fetch(TURN_API);
+      ICE = ICE.concat(await r.json());
+    }catch(e){ status('Relais indisponible, on tente sans…'); }
+  } else if(TURN_MANUAL.urls){
+    ICE.push({
+      urls: TURN_MANUAL.urls.split(',').map(s => s.trim()),
+      username: TURN_MANUAL.username,
+      credential: TURN_MANUAL.credential
+    });
+  }
 
+  if(TURN_API || TURN_MANUAL.urls){
+    $('relay').textContent = 'Test du relais…';
+    const good = await testRelay();
+    $('relay').textContent = good ? 'Relais : OK ✔' : 'Relais : REFUSÉ ✘';
+  }
   connect(code, role);
 }
 
-// Vérifie qu'on obtient bien un candidat "relay" auprès du TURN
+// Test simple : un candidat "relay" doit être obtenu
 function testRelay(){
-  return new Promise(res => {
-    let done = false;
+  return new Promise(resolve => {
     const pc = new RTCPeerConnection({ iceServers: ICE, iceTransportPolicy: 'relay' });
-    const fin = v => { if(!done){ done = true; try{pc.close();}catch(e){} res(v); } };
-    pc.onicecandidate = e => {
-      if(e.candidate){
-        if(e.candidate.candidate.includes(' typ relay')){
-          log('cand: ' + e.candidate.candidate.split(' ').slice(4,6).join(' ') + ' typ relay');
-          fin(true);
-        }
-      }
-    };
-    pc.onicecandidateerror = e => log('ICE ERROR ' + e.errorCode + ' ' + (e.url || ''));
-    pc.createDataChannel('x');
-    pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => fin(false));
-    setTimeout(() => fin(false), 8000);
+    pc.createDataChannel('t');
+    let done = false;
+    const finish = v => { if(!done){ done = true; pc.close(); resolve(v); } };
+    pc.onicecandidate = e => { if(e.candidate && e.candidate.candidate.includes(' typ relay')) finish(true); };
+    pc.onicegatheringstatechange = () => { if(pc.iceGatheringState === 'complete') finish(false); };
+    pc.createOffer().then(o => pc.setLocalDescription(o));
+    setTimeout(() => finish(false), 6000);
   });
 }
 
-// Rôle 'a' = attend, rôle 'b' = appelle (et réessaie toutes les 3 s)
-function connect(code, role){
-  const meId = 'call-' + code + '-' + role;
-  const otherId = 'call-' + code + '-' + (role === 'a' ? 'b' : 'a');
+let ok = false;
 
-  peer = new Peer(meId, { config: { iceServers: ICE, iceTransportPolicy: 'relay' } });
+// Rôle 'a' attend, rôle 'b' appelle (réessaie toutes les 3 s)
+function connect(code, role){
+  const me = 'call-'+code+'-'+role;
+  const other = 'call-'+code+'-'+(role === 'a' ? 'b' : 'a');
+  peer = new Peer(me, {
+    config: { iceServers: ICE, iceTransportPolicy: 'all' }
+  });
 
   function tryCall(){
-    if(connected || peer.destroyed) return;
+    if(ok || peer.destroyed) return;
     status('Appel en cours…');
-    log('appel sortant vers ' + otherId);
-    setCall(peer.call(otherId, stream));
+    setCall(peer.call(other, stream));
   }
 
-  peer.on('open', id => {
-    log('peer open: ' + id);
+  peer.on('open', () => {
     if(role === 'a') status('En attente de l’autre personne…');
     else tryCall();
   });
-
-  peer.on('call', c => {
-    log('appel entrant');
-    c.answer(stream);
-    setCall(c);
-  });
-
+  peer.on('call', c => { c.answer(stream); setCall(c); });
   peer.on('disconnected', () => { if(!peer.destroyed) peer.reconnect(); });
-
   peer.on('error', e => {
-    log('peer error: ' + e.type);
     if(e.type === 'peer-unavailable'){
       status('L’autre n’est pas encore là, nouvel essai…');
       setTimeout(tryCall, 3000);
@@ -147,66 +137,33 @@ function connect(code, role){
       status('Ancienne session encore active, nouvel essai…');
       peer.destroy();
       setTimeout(() => connect(code, role), 4000);
-    } else {
-      status('Erreur : ' + e.type);
     }
   });
 }
 
 function setCall(c){
   call = c;
-  let got = false;
+  const pc = c.peerConnection;
+
+  pc.addEventListener('iceconnectionstatechange', () => {
+    const st = pc.iceConnectionState;
+    if(st === 'connected' || st === 'completed'){
+      ok = true;
+      status('Connecté ✔');
+      adapt(pc);
+    }
+    else if(st === 'failed') status('Échec réseau. Rechargez et réessayez.');
+    else status('Réseau : ' + st + ' …');
+  });
 
   c.on('stream', s => {
-    if(got) return;
-    got = true;
-    log('flux distant reçu');
     const r = $('remote');
     r.srcObject = s;
     r.play().catch(() => {});
-    limit(c.peerConnection);
-    startStats(c.peerConnection);
   });
 
-  c.on('close', () => {
-    log('appel fermé');
-    if(!connected) status('Appel fermé, rechargez la page pour réessayer.');
-    else status('Appel terminé. Rechargez la page pour rappeler.');
-  });
-
-  c.on('error', e => log('call error: ' + e));
-
-  // Le peerConnection n'existe qu'un instant après la création de l'appel
-  const attach = () => {
-    const pc = c.peerConnection;
-    if(!pc) return setTimeout(attach, 50);
-
-    pc.addEventListener('icecandidate', e => {
-      if(e.candidate) log('local: ' + e.candidate.candidate.split(' ').slice(4,8).join(' '));
-    });
-    pc.addEventListener('icecandidateerror', e => log('ICE ERROR ' + e.errorCode + ' ' + (e.url || '')));
-    pc.addEventListener('iceconnectionstatechange', () => {
-      const st = pc.iceConnectionState;
-      log('ICE: ' + st);
-      if(st === 'connected' || st === 'completed'){
-        connected = true;
-        status('Connecté ✔ (touchez la vidéo pour activer le son)');
-      } else if(st === 'failed'){
-        status('Échec réseau (ICE failed). Rechargez et réessayez.');
-      } else if(st === 'disconnected'){
-        status('Connexion instable…');
-      } else {
-        status('Réseau : ' + st + ' …');
-      }
-    });
-  };
-  attach();
-}
-
-// Affiche ce qui est réellement reçu (0 Ko = rien ne passe)
-function startStats(pc){
-  clearInterval(statsTimer);
-  statsTimer = setInterval(async () => {
+  // Statistiques réseau toutes les 2 s
+  setInterval(async () => {
     try{
       const st = await pc.getStats();
       let v = 0, a = 0;
@@ -216,30 +173,45 @@ function startStats(pc){
           if(x.kind === 'audio') a = x.bytesReceived;
         }
       });
-      $('dbg').textContent = 'Reçu de l’autre : vidéo ' + Math.round(v/1024) + ' Ko, audio ' + Math.round(a/1024) + ' Ko';
+      $('dbg').textContent = 'Reçu : vidéo ' + Math.round(v/1024) + ' Ko, audio ' + Math.round(a/1024) + ' Ko';
     }catch(e){}
   }, 2000);
+
+  c.on('close', () => status('Appel terminé. Rechargez la page pour rappeler.'));
 }
 
-// Limite le débit vidéo (connexion faible)
-function limit(pc){
-  try{
-    pc.getSenders().forEach(s => {
-      if(s.track && s.track.kind === 'video'){
-        const p = s.getParameters();
-        if(!p.encodings || !p.encodings.length) p.encodings = [{}];
-        p.encodings[0].maxBitrate = 40000;
-        p.encodings[0].maxFramerate = 8;
-        s.setParameters(p).catch(() => {});
-      }
-    });
-  }catch(e){}
+// Adaptation : on laisse WebRTC gérer la résolution et le débit,
+// on fixe seulement un plafond raisonnable pour ne pas saturer une connexion moyenne
+function adapt(pc){
+  pc.getSenders().forEach(s => {
+    if(!s.track) return;
+    const p = s.getParameters();
+    if(!p.encodings || !p.encodings.length) p.encodings = [{}];
+    if(s.track.kind === 'video'){
+      p.encodings[0].maxBitrate = 800000;   // jusqu'à ~800 kbit/s si le réseau suit
+      p.encodings[0].maxFramerate = 30;
+      p.degradationPreference = 'maintain-framerate'; // en cas de mauvais réseau : on privilégie la fluidité
+    } else {
+      p.encodings[0].maxBitrate = 64000;    // audio ~64 kbit/s, bonne qualité voix
+    }
+    s.setParameters(p).catch(() => {});
+  });
 }
 
 function toggleCam(){
   const v = stream.getVideoTracks()[0];
   v.enabled = !v.enabled;
   $('cam').textContent = v.enabled ? 'Couper la vidéo (audio seul)' : 'Remettre la vidéo';
+}
+
+function toggleFull(){
+  if(!document.fullscreenElement){
+    $('box').requestFullscreen().catch(() => {});
+    $('full').textContent = 'Quitter le plein écran';
+  } else {
+    document.exitFullscreen();
+    $('full').textContent = 'Plein écran';
+  }
 }
 </script>
 </body>
