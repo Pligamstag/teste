@@ -108,7 +108,7 @@ function connect(code, role){
   const me = 'call-'+code+'-'+role;
   const other = 'call-'+code+'-'+(role === 'a' ? 'b' : 'a');
   peer = new Peer(me, {
-    config: { iceServers: ICE }
+    config: { iceServers: ICE, iceTransportPolicy: 'relay' }
   });
 
   function tryCall(){
