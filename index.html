@@ -1,82 +1,117 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Appel vidéo</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Appel léger</title>
 <style>
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; font-family: system-ui, sans-serif;
-    background: #111; color: #fff; min-height: 100vh;
-    display: flex; flex-direction: column; align-items: center;
-  }
-  h1 { font-size: 1.4rem; margin: 16px 0 8px; }
-  #s { font-size: 14px; opacity: .85; text-align: center; padding: 0 12px; min-height: 1.2em; }
-  #relay, #dbg { font-size: 12px; opacity: .6; text-align: center; padding: 4px; }
-
-  #join {
-    display: flex; flex-direction: column; gap: 10px;
-    width: min(92vw, 380px); margin-top: 24px;
-  }
-  input {
-    padding: 14px; font-size: 16px; border-radius: 10px;
-    border: 1px solid #333; background: #222; color: #fff;
-  }
-  button {
-    padding: 14px; font-size: 16px; border: 0; border-radius: 10px;
-    background: #e0457b; color: #fff; cursor: pointer;
-  }
-  button.secondary { background: #333; }
-  button:disabled { opacity: .5; }
-
-  #cam { display: none; width: 100%; max-width: 900px; margin-top: 12px; }
-  #box {
-    display: grid; gap: 8px; width: 100%; padding: 8px;
-    grid-template-columns: 1fr;
-  }
-  @media (min-width: 700px) { #box { grid-template-columns: 1fr 1fr; } }
-  video {
-    width: 100%; aspect-ratio: 4 / 3; background: #000;
-    border-radius: 12px; object-fit: cover;
-  }
-  #controls { display: flex; gap: 8px; margin: 8px 0 16px; flex-wrap: wrap; justify-content: center; }
-  #controls button { width: auto; padding: 12px 18px; }
-  .hidden { display: none !important; }
+*{box-sizing:border-box}
+:root{--bg:#1b1c20;--panel:#26282d;--line:#34373e;--text:#eceef2;--mute:#9aa0aa;--accent:#5b8cff;--danger:#e5484d;--ok:#3fb950}
+html,body{margin:0;height:100%}
+body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);overflow:hidden;display:flex;flex-direction:column}
+button{font:inherit;cursor:pointer;border:0;border-radius:12px;padding:10px 14px;background:#3a3d45;color:var(--text)}
+button:hover{background:#464a53}
+button.primary{background:var(--accent);color:#fff}
+button.danger{background:var(--danger);color:#fff}
+button.ok{background:var(--ok);color:#fff}
+input{font:inherit;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);width:100%;outline:none}
+input:focus{border-color:var(--accent)}
+#join{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px 16px}
+#join h1{margin:0;font-size:24px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:12px;width:min(92vw,380px)}
+.muted{color:var(--mute);font-size:13px;text-align:center}
+#room{display:none;flex:1;flex-direction:column;min-height:0}
+#stage{flex:1;position:relative;background:#000;overflow:hidden;min-height:0}
+#remote{width:100%;height:100%;object-fit:contain;background:#000}
+#self{position:absolute;width:180px;height:135px;right:14px;bottom:14px;background:#111;border-radius:12px;overflow:hidden;border:2px solid var(--line);cursor:grab;touch-action:none;z-index:5}
+#self video{width:100%;height:100%;object-fit:cover}
+#self .name{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.6);padding:2px 8px;border-radius:6px;font-size:12px}
+#self.off video{display:none}
+#self.off .avatar{display:flex}
+.avatar{display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:34px;font-weight:600;background:#2d3340}
+#bar{height:76px;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px;background:var(--panel);border-top:1px solid var(--line);flex-wrap:wrap}
+#bar button{min-width:52px;height:52px;border-radius:50%;padding:0;font-size:20px}
+#bar button.hang{border-radius:26px;width:auto;padding:0 20px;background:var(--danger);color:#fff}
+#emojis{display:none;position:absolute;bottom:90px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px;gap:4px;flex-wrap:wrap;width:260px;z-index:20}
+#emojis.open{display:flex}
+#emojis button{width:44px;height:44px;font-size:22px;padding:0;border-radius:10px;background:transparent}
+#emojis button:hover{background:#3a3d45}
+.float{position:absolute;bottom:90px;font-size:36px;pointer-events:none;animation:up 2.3s ease-out forwards;z-index:30}
+@keyframes up{to{transform:translateY(-220px);opacity:0}}
+#chat{position:absolute;top:0;right:0;bottom:0;width:min(88vw,300px);background:var(--panel);border-left:1px solid var(--line);display:none;flex-direction:column;z-index:40}
+#chat.open{display:flex}
+#chatHead{padding:12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+#msgs{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.msg{background:#2f3239;border-radius:10px;padding:8px 10px;font-size:14px;word-wrap:break-word}
+.msg.me{background:var(--accent);color:#fff}
+.msg .who{font-size:11px;opacity:.7;margin-bottom:2px}
+#chatForm{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)}
+#toasts{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:100;width:min(92vw,340px)}
+.toast{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.toast .acts{display:flex;gap:8px;margin-top:8px}
+.toast .acts button{flex:1;padding:8px}
+#status{font-size:13px;color:var(--mute);text-align:center;min-height:18px}
+#link{word-break:break-all;font-size:12px;color:var(--accent);background:var(--bg);border-radius:8px;padding:8px}
+#inviteBox{display:none;flex-direction:column;gap:8px}
 </style>
 </head>
 <body>
 
-<h1>Appel vidéo</h1>
-
 <div id="join">
-  <input id="code" placeholder="Code secret (4 caractères min, ex : nous2026)" autocomplete="off">
-  <button id="btnCreate" onclick="start('a')">Je lance l'appel</button>
-  <button id="btnJoin" class="secondary" onclick="start('b')">Je rejoins</button>
+  <div class="card">
+    <h1 style="text-align:center">Appel léger</h1>
+    <input id="name" placeholder="Votre pseudo">
+    <button class="primary" onclick="createRoom()">Créer une réunion</button>
+    <div id="inviteBox">
+      <div class="muted">Partagez ce lien :</div>
+      <div id="link"></div>
+      <button onclick="copyLink()">Copier le lien</button>
+    </div>
+    <div class="muted">ou rejoindre avec un lien reçu :</div>
+    <input id="code" placeholder="Code de la réunion">
+    <button onclick="requestJoin()">Demander à rejoindre</button>
+    <div id="status"></div>
+  </div>
 </div>
 
-<div id="s">Mettez le même code tous les deux.</div>
-<div id="relay"></div>
-<div id="dbg"></div>
-
-<div id="cam">
-  <div id="box">
-    <video id="me" autoplay playsinline muted></video>
+<div id="room">
+  <div id="stage">
     <video id="remote" autoplay playsinline></video>
+    <div id="self">
+      <video id="me" autoplay muted playsinline></video>
+      <div class="avatar" id="avatar"></div>
+      <div class="name" id="selfName"></div>
+    </div>
+    <div id="emojis"></div>
+    <div id="chat">
+      <div id="chatHead"><b>Chat</b><button onclick="toggleChat()">✕</button></div>
+      <div id="msgs"></div>
+      <form id="chatForm" onsubmit="sendChat(event)">
+        <input id="chatIn" placeholder="Message">
+        <button class="primary" type="submit">➤</button>
+      </form>
+    </div>
   </div>
-  <div id="controls">
-    <button id="btnCam" class="secondary" onclick="toggleCam()">Couper la vidéo (audio seul)</button>
-    <button id="btnMute" class="secondary" onclick="toggleMic()">Couper le micro</button>
-    <button onclick="leave()">Quitter</button>
+  <div id="bar">
+    <button id="bMic" onclick="toggleMic()" title="Micro">🎤</button>
+    <button id="bCam" onclick="toggleCam()" title="Caméra">📷</button>
+    <button onclick="toggleScreen()" title="Partage d'écran">🖥️</button>
+    <button onclick="toggleEmojis()" title="Émojis">😀</button>
+    <button onclick="toggleChat()" title="Chat">💬</button>
+    <button onclick="togglePiP()" title="Picture in picture">⧉</button>
+    <button onclick="toggleFull()" title="Plein écran">⛶</button>
+    <button class="hang" onclick="hangup()">Quitter</button>
   </div>
 </div>
+
+<div id="toasts"></div>
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 
-// ===== Serveurs de relais (Metered, identifiants intégrés) =====
-const TURN_SERVERS = [
+// ===== Relais TURN (Metered), en dur =====
+const ICE = [
   { urls: 'stun:stun.relay.metered.ca:80' },
   {
     urls: [
@@ -90,193 +125,286 @@ const TURN_SERVERS = [
   }
 ];
 
-let stream = null, peer = null, call = null, connected = false;
-let myRole = null, myCode = null, retryTimer = null;
+const EMOJIS = ['👍','👏','😂','😮','❤️','🎉','🙏','🔥'];
 
-function status(t){ $('s').textContent = t; }
+let stream = null, screenStream = null, peer = null, call = null, conn = null;
+let myName = '', isHost = false, roomId = '';
+let pending = new Map();
+let micOn = true, camOn = true;
 
-// Affiche de gros messages clairs pour une personne qui a un réseau faible
-function explain(t){ status(t); $('dbg').textContent = ''; }
+const params = new URLSearchParams(location.search);
+if(params.get('room')) $('code').value = params.get('room');
 
-// ===== Démarrage =====
-async function start(role){
-  const code = $('code').value.trim().toLowerCase().replace(/[^a-z0-9]/g,'');
-  if(code.length < 4) return status('Code trop court (4 caractères minimum).');
+function status(t){ $('status').textContent = t; }
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&','<':'<','>':'>','"':'"',"'":'''}[c]));
+}
+function roomOf(s){ return String(s).trim().toLowerCase().replace(/\W/g,''); }
 
-  $('btnCreate').disabled = $('btnJoin').disabled = true;
-  status('Demande d’accès à la caméra et au micro…');
-
-  try{
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { width:{ideal:320}, height:{ideal:240}, frameRate:{ideal:12,max:15} },
-      audio: { echoCancellation:true, noiseSuppression:true, channelCount:1 }
-    });
-  }catch(e){
-    $('btnCreate').disabled = $('btnJoin').disabled = false;
-    return status('Caméra ou micro refusés : ' + e.message);
-  }
-
+async function getMedia(){
+  stream = await navigator.mediaDevices.getUserMedia({
+    video:{width:{ideal:320},height:{ideal:240},frameRate:{ideal:10,max:12}},
+    audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}
+  });
   $('me').srcObject = stream;
-  $('join').classList.add('hidden');
-  $('cam').style.display = 'block';
-
-  myRole = role;
-  myCode = code;
-  $('relay').textContent = 'Vérification du relais…';
-  const good = await testRelay();
-  $('relay').textContent = good ? 'Relais : OK ✔' : 'Relais : indisponible (la connexion peut être plus lente)';
-
-  connect();
 }
 
-// ===== Test du relais TURN =====
-function testRelay(){
-  return new Promise(res => {
-    let done = false;
-    const pc = new RTCPeerConnection({ iceServers: TURN_SERVERS, iceTransportPolicy: 'relay' });
-    const fin = v => { if(!done){ done = true; pc.close(); res(v); } };
-    pc.onicecandidate = e => {
-      if(e.candidate && e.candidate.candidate.includes(' typ relay')) fin(true);
-    };
-    pc.createDataChannel('x');
-    pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => fin(false));
-    setTimeout(() => fin(false), 8000);
-  });
+function showRoom(){
+  $('join').style.display = 'none';
+  $('room').style.display = 'flex';
+  $('selfName').textContent = myName;
+  $('avatar').textContent = myName.charAt(0).toUpperCase();
+  enableDrag();
 }
 
-// ===== Connexion PeerJS =====
-function connect(){
-  const me = 'call-' + myCode + '-' + myRole;
-  const other = 'call-' + myCode + '-' + (myRole === 'a' ? 'b' : 'a');
-
-  peer = new Peer(me, {
-    config: { iceServers: TURN_SERVERS, iceTransportPolicy: 'all', bundlePolicy: 'max-bundle' }
+// ===== Hôte =====
+async function createRoom(){
+  myName = $('name').value.trim();
+  if(!myName) return status('Entrez un pseudo.');
+  roomId = Math.random().toString(36).slice(2,8);
+  isHost = true;
+  const link = location.origin + location.pathname + '?room=' + roomId;
+  $('link').textContent = link;
+  $('inviteBox').style.display = 'flex';
+  status('Préparation…');
+  try{ await getMedia(); }catch(e){ return status('Caméra/micro refusés : ' + e.message); }
+  peer = new Peer('room-' + roomId, { config: { iceServers: ICE } });
+  peer.on('open', () => { status('Réunion créée. En attente…'); showRoom(); });
+  peer.on('connection', c => {
+    c.on('data', d => { if(d.t === 'join') showJoinRequest(c, d.name); });
   });
-
-  function tryCall(){
-    if(connected || !peer || peer.destroyed) return;
-    status('Appel en cours…');
-    setCall(peer.call(other, stream));
-  }
-
-  peer.on('open', () => {
-    if(myRole === 'a') status('En attente de l’autre personne…');
-    else tryCall();
-  });
-
   peer.on('call', c => { c.answer(stream); setCall(c); });
-
-  peer.on('disconnected', () => { if(peer && !peer.destroyed) peer.reconnect(); });
-
-  peer.on('error', e => {
-    if(e.type === 'peer-unavailable'){
-      status('L’autre n’est pas encore là, nouvel essai dans 3 s…');
-      clearTimeout(retryTimer);
-      retryTimer = setTimeout(tryCall, 3000);
-    } else if(e.type === 'unavailable-id'){
-      status('Ancienne session encore active, nouvel essai…');
-      peer.destroy();
-      setTimeout(connect, 4000);
-    } else {
-      status('Erreur de connexion (' + e.type + '). Rechargez la page.');
-    }
-  });
+  peer.on('error', e => status('Erreur : ' + e.type));
 }
 
-// ===== Appel =====
+function copyLink(){
+  navigator.clipboard.writeText($('link').textContent);
+  status('Lien copié.');
+}
+
+function showJoinRequest(c, name){
+  const id = 'j' + Date.now() + Math.floor(Math.random() * 1000);
+  pending.set(id, { conn: c, name: name });
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.id = id;
+  t.innerHTML = '<b>' + escapeHtml(name) + '</b> veut rejoindre la réunion';
+  const acts = document.createElement('div');
+  acts.className = 'acts';
+  const ok = document.createElement('button');
+  ok.className = 'ok';
+  ok.textContent = 'Accepter';
+  ok.onclick = () => respond(id, true);
+  const no = document.createElement('button');
+  no.className = 'danger';
+  no.textContent = 'Refuser';
+  no.onclick = () => respond(id, false);
+  acts.appendChild(ok);
+  acts.appendChild(no);
+  t.appendChild(acts);
+  $('toasts').appendChild(t);
+}
+
+function respond(id, accept){
+  const p = pending.get(id);
+  if(!p) return;
+  pending.delete(id);
+  const el = $(id);
+  if(el) el.remove();
+  if(accept){
+    p.conn.send({ t: 'accepted' });
+    conn = p.conn;
+    conn.on('data', handleData);
+    const c = peer.call(p.conn.peer, stream);
+    setCall(c);
+  } else {
+    p.conn.send({ t: 'refused' });
+    setTimeout(() => p.conn.close(), 300);
+  }
+}
+
+// ===== Invité =====
+async function requestJoin(){
+  myName = $('name').value.trim();
+  roomId = roomOf($('code').value);
+  if(!myName) return status('Entrez un pseudo.');
+  if(roomId.length < 4) return status('Code invalide.');
+  isHost = false;
+  status('Connexion…');
+  try{ await getMedia(); }catch(e){ return status('Caméra/micro refusés : ' + e.message); }
+  peer = new Peer({ config: { iceServers: ICE } });
+  peer.on('open', () => {
+    conn = peer.connect('room-' + roomId, { reliable: true });
+    conn.on('open', () => {
+      status('Demande envoyée, en attente de l’hôte…');
+      conn.send({ t: 'join', name: myName });
+    });
+    conn.on('data', handleData);
+    conn.on('close', () => status('L’hôte a fermé la réunion.'));
+  });
+  peer.on('call', c => { c.answer(stream); setCall(c); });
+  peer.on('error', e => status('Erreur : ' + e.type));
+}
+
+function handleData(d){
+  if(d.t === 'accepted'){ status('Acceptée, connexion…'); showRoom(); }
+  else if(d.t === 'refused'){ alert('L’hôte a refusé votre demande.'); location.href = location.pathname; }
+  else if(d.t === 'chat'){ addMsg(d.name, d.v, false); }
+  else if(d.t === 'emoji'){ showFloat(d.v); }
+}
+
+// ===== Appel vidéo =====
 function setCall(c){
   call = c;
-
-  // Suivi réel de l'état réseau (ICE), et non de la simple négociation
-  setTimeout(() => {
-    try {
-      const pc = c.peerConnection;
-      pc.addEventListener('iceconnectionstatechange', () => {
-        const st = pc.iceConnectionState;
-        if(st === 'connected' || st === 'completed'){
-          connected = true;
-          status('Connecté ✔');
-        } else if(st === 'checking'){
-          status('Recherche du meilleur chemin réseau…');
-        } else if(st === 'disconnected'){
-          status('Connexion instable, rétablissement en cours…');
-        } else if(st === 'failed'){
-          connected = false;
-          status('Connexion impossible. Vérifiez votre réseau puis rechargez.');
-        }
-      });
-    } catch(e){}
-  }, 0);
-
   c.on('stream', s => {
-    const r = $('remote');
-    r.srcObject = s;
-    limit(c.peerConnection);
-    r.play().catch(() => {});
-    startStats(c);
+    $('remote').srcObject = s;
+    $('remote').play().catch(() => {});
+    status('Connecté ✔');
   });
-
-  c.on('close', () => {
-    connected = false;
-    status('Appel terminé. Rechargez la page pour rappeler.');
-  });
-}
-
-// Affiche la quantité de données reçues (pour savoir si le flux arrive)
-function startStats(c){
-  setInterval(async () => {
-    try {
-      const st = await c.peerConnection.getStats();
-      let v = 0, a = 0;
-      st.forEach(x => {
-        if(x.type === 'inbound-rtp'){
-          if(x.kind === 'video') v = x.bytesReceived;
-          if(x.kind === 'audio') a = x.bytesReceived;
+  c.on('close', () => status('Appel terminé.'));
+  setTimeout(() => {
+    try{
+      c.peerConnection.getSenders().forEach(snd => {
+        if(snd.track && snd.track.kind === 'video'){
+          const p = snd.getParameters();
+          if(!p.encodings || !p.encodings.length) p.encodings = [{}];
+          p.encodings[0].maxBitrate = 60000;
+          p.encodings[0].maxFramerate = 10;
+          snd.setParameters(p).catch(() => {});
         }
       });
-      $('dbg').textContent = 'Reçu : vidéo ' + Math.round(v/1024) + ' Ko · audio ' + Math.round(a/1024) + ' Ko';
-    } catch(e){}
-  }, 2000);
+    }catch(e){}
+  }, 800);
 }
 
-// Limite le débit pour les connexions faibles : vidéo ~60 kbit/s, audio ~20 kbit/s
-function limit(pc){
-  pc.getSenders().forEach(s => {
-    if(!s.track) return;
-    const p = s.getParameters();
-    if(!p.encodings || !p.encodings.length) p.encodings = [{}];
-    if(s.track.kind === 'video'){
-      p.encodings[0].maxBitrate = 60000;
-      p.encodings[0].maxFramerate = 10;
-    } else {
-      p.encodings[0].maxBitrate = 20000;
-    }
-    s.setParameters(p).catch(()=>{});
-  });
-}
+function send(obj){ if(conn && conn.open) conn.send(obj); }
 
 // ===== Commandes =====
-function toggleCam(){
-  if(!stream) return;
-  const v = stream.getVideoTracks()[0];
-  if(!v) return;
-  v.enabled = !v.enabled;
-  $('btnCam').textContent = v.enabled ? 'Couper la vidéo (audio seul)' : 'Remettre la vidéo';
-}
-
 function toggleMic(){
-  if(!stream) return;
-  const a = stream.getAudioTracks()[0];
-  if(!a) return;
-  a.enabled = !a.enabled;
-  $('btnMute').textContent = a.enabled ? 'Couper le micro' : 'Remettre le micro';
+  micOn = !micOn;
+  if(stream) stream.getAudioTracks().forEach(t => t.enabled = micOn);
+  $('bMic').textContent = micOn ? '🎤' : '🔇';
 }
 
-function leave(){
+function toggleCam(){
+  camOn = !camOn;
+  if(stream) stream.getVideoTracks().forEach(t => t.enabled = camOn);
+  $('self').classList.toggle('off', !camOn);
+  $('bCam').textContent = camOn ? '📷' : '🚫';
+}
+
+async function toggleScreen(){
+  if(screenStream){
+    screenStream.getTracks().forEach(t => t.stop());
+    screenStream = null;
+    const cam = stream && stream.getVideoTracks()[0];
+    const sender = call && call.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+    if(sender && cam) sender.replaceTrack(cam);
+    return status('Partage arrêté.');
+  }
+  try{
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+    const track = screenStream.getVideoTracks()[0];
+    const sender = call && call.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+    if(sender) sender.replaceTrack(track);
+    track.onended = () => { screenStream = null; };
+  }catch(e){ status('Partage annulé.'); }
+}
+
+function toggleEmojis(){
+  const box = $('emojis');
+  if(!box.childElementCount){
+    EMOJIS.forEach(e => {
+      const b = document.createElement('button');
+      b.textContent = e;
+      b.onclick = () => sendEmoji(e);
+      box.appendChild(b);
+    });
+  }
+  box.classList.toggle('open');
+}
+
+function sendEmoji(e){
+  send({ t: 'emoji', v: e });
+  showFloat(e);
+}
+
+function showFloat(e){
+  const f = document.createElement('div');
+  f.className = 'float';
+  f.textContent = e;
+  f.style.left = (20 + Math.random() * 60) + '%';
+  $('stage').appendChild(f);
+  setTimeout(() => f.remove(), 2300);
+}
+
+function toggleChat(){ $('chat').classList.toggle('open'); }
+
+function sendChat(e){
+  e.preventDefault();
+  const v = $('chatIn').value.trim();
+  if(!v) return;
+  addMsg(myName, v, true);
+  send({ t: 'chat', name: myName, v: v });
+  $('chatIn').value = '';
+}
+
+function addMsg(name, text, me){
+  const d = document.createElement('div');
+  d.className = 'msg' + (me ? ' me' : '');
+  const w = document.createElement('div');
+  w.className = 'who';
+  w.textContent = me ? 'Vous' : name;
+  d.appendChild(w);
+  d.appendChild(document.createTextNode(text));
+  $('msgs').appendChild(d);
+  $('msgs').scrollTop = $('msgs').scrollHeight;
+}
+
+async function togglePiP(){
+  try{
+    if(document.pictureInPictureElement) await document.exitPictureInPicture();
+    else await $('remote').requestPictureInPicture();
+  }catch(e){ status('Picture-in-picture indisponible.'); }
+}
+
+function toggleFull(){
+  if(!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+  else document.exitFullscreen();
+}
+
+// Caméra locale déplaçable (souris + tactile)
+function enableDrag(){
+  const self = $('self'), stage = $('stage');
+  let dragging = false, offX = 0, offY = 0;
+  self.onpointerdown = e => {
+    dragging = true;
+    const r = self.getBoundingClientRect();
+    offX = e.clientX - r.left;
+    offY = e.clientY - r.top;
+    self.setPointerCapture(e.pointerId);
+  };
+  self.onpointermove = e => {
+    if(!dragging) return;
+    const s = stage.getBoundingClientRect();
+    let x = e.clientX - s.left - offX;
+    let y = e.clientY - s.top - offY;
+    x = Math.max(0, Math.min(x, s.width - self.offsetWidth));
+    y = Math.max(0, Math.min(y, s.height - self.offsetHeight));
+    self.style.left = x + 'px';
+    self.style.top = y + 'px';
+    self.style.right = 'auto';
+    self.style.bottom = 'auto';
+  };
+  self.onpointerup = () => { dragging = false; };
+}
+
+function hangup(){
   if(call) call.close();
   if(peer) peer.destroy();
   if(stream) stream.getTracks().forEach(t => t.stop());
-  location.reload();
+  if(screenStream) screenStream.getTracks().forEach(t => t.stop());
+  location.href = location.pathname;
 }
 </script>
 </body>
