@@ -4,15 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Appel léger</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
   body{margin:0;font-family:system-ui,sans-serif;background:#111;color:#eee;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px}
-  video{width:100%;max-width:480px;background:#000;border-radius:10px}
-  #me{max-width:140px;position:absolute;right:16px;top:16px;opacity:.9}
   #box{position:relative;width:100%;max-width:480px}
+  video{width:100%;background:#000;border-radius:10px;display:block}
+  #me{width:110px;position:absolute;right:8px;top:8px;opacity:.9;border-radius:8px}
   input,button{font-size:16px;padding:10px;border-radius:8px;border:0}
-  button{background:#e0457b;color:#fff}
-  #s{font-size:14px;opacity:.8;text-align:center}
-  #log{width:100%;max-width:480px;height:180px;overflow:auto;background:#000;color:#8f8;font:11px monospace;padding:6px;border-radius:8px;white-space:pre-wrap;box-sizing:border-box}
+  button{background:#e0457b;color:#fff;cursor:pointer}
+  #s{font-size:14px;opacity:.9;text-align:center}
+  #relay{font-size:13px}
+  #dbg{font-size:12px;opacity:.7}
+  #log{font-size:11px;font-family:monospace;opacity:.6;width:100%;max-width:480px;max-height:160px;overflow:auto;background:#000;padding:6px;border-radius:6px;white-space:pre-wrap}
 </style>
 </head>
 <body>
@@ -21,184 +24,148 @@
     <button onclick="start('a')">Je lance l'appel</button>
     <button onclick="start('b')">Je rejoins</button>
   </div>
+
   <div id="s">Mettez le même code tous les deux.</div>
-  <div id="dbg" style="font-size:12px;opacity:.6"></div>
+  <div id="relay"></div>
+  <div id="dbg"></div>
+
   <div id="box">
     <video id="remote" autoplay playsinline onclick="this.muted=false;this.play()"></video>
     <video id="me" autoplay playsinline muted></video>
   </div>
+
   <button id="cam" style="display:none" onclick="toggleCam()">Couper la vidéo (audio seul)</button>
   <div id="log"></div>
 
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
-const $ = id => document.getElementById(id);
-
-// ===== Relais ExpressTURN : mettez ici VOS identifiants actuels =====
-const TURN_STATIC = [
-  {
-    urls: [
-      'turn:free.expressturn.com:3478',
-      'turn:free.expressturn.com:3478?transport=tcp'
-    ],
-    username: '000000002110890657',
-    credential: 'bsEiTWwvTfHHRZ091mt4+Bq1omM='
-  }
+// ====== CONFIG TURN (Metered) ======
+const ICE = [
+  { urls: "stun:stun.relay.metered.ca:80" },
+  { urls: "turn:global.relay.metered.ca:80",
+    username: "403d8a7db25a819098d7d8c9", credential: "go7c760i2qYbDGN1" },
+  { urls: "turn:global.relay.metered.ca:80?transport=tcp",
+    username: "403d8a7db25a819098d7d8c9", credential: "go7c760i2qYbDGN1" },
+  { urls: "turn:global.relay.metered.ca:443",
+    username: "403d8a7db25a819098d7d8c9", credential: "go7c760i2qYbDGN1" },
+  { urls: "turns:global.relay.metered.ca:443?transport=tcp",
+    username: "403d8a7db25a819098d7d8c9", credential: "go7c760i2qYbDGN1" }
 ];
 
-let ICE = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' }
-].concat(TURN_STATIC);
-
-let stream, peer, call, myRole, myCode;
-let ok = false, retryTimer = null, statsTimer = null;
+const $ = id => document.getElementById(id);
+let stream, peer, call, ok = false, retryTimer = null, statsTimer = null;
 
 function status(t){ $('s').textContent = t; }
 function log(t){
-  const d = new Date().toTimeString().slice(0,8);
+  const d = new Date().toLocaleTimeString('fr-FR');
   $('log').textContent += d + ' ' + t + '\n';
-  $('log').scrollTop = 1e9;
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+// Test du relais : on doit obtenir au moins un candidat "typ relay"
+function testRelay(){
+  return new Promise(resolve => {
+    const pc = new RTCPeerConnection({ iceServers: ICE, iceTransportPolicy: 'relay' });
+    let found = false;
+    const done = v => { if(!found || v){ found = found || v; } try{ pc.close(); }catch(e){} resolve(v); };
+    pc.createDataChannel('t');
+    pc.onicecandidate = e => {
+      if(e.candidate){
+        log('cand: ' + e.candidate.candidate.split(' ').slice(4,8).join(' '));
+        if(e.candidate.candidate.includes(' typ relay')) done(true);
+      }
+    };
+    pc.onicecandidateerror = e => log('ICE ERROR ' + e.errorCode + ' ' + (e.url||''));
+    pc.createOffer().then(o => pc.setLocalDescription(o));
+    setTimeout(() => done(false), 8000);
+  });
 }
 
 async function start(role){
   const code = $('code').value.trim().toLowerCase().replace(/\W/g,'');
   if(code.length < 4) return status('Code trop court (4 caractères min).');
-  myRole = role; myCode = code;
+
   try{
     stream = await navigator.mediaDevices.getUserMedia({
-      video:{width:{ideal:160},height:{ideal:120},frameRate:{ideal:8,max:10}},
-      audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}
+      video:{ width:{ideal:160}, height:{ideal:120}, frameRate:{ideal:8, max:10} },
+      audio:{ echoCancellation:true, noiseSuppression:true, channelCount:1 }
     });
   }catch(e){ return status('Caméra/micro refusés : ' + e.message); }
+
   $('me').srcObject = stream;
   $('join').style.display = 'none';
   $('cam').style.display = 'block';
 
-  log('TURN : ExpressTURN configuré');
-  status('Test du relais…');
+  log('TURN : Metered configuré');
+  $('relay').textContent = 'Test du relais…';
   const good = await testRelay();
+  $('relay').textContent = good ? 'Relais : OK ✔' : 'Relais : REFUSÉ ✘ (attendre 2 min après création des identifiants, ou réseau qui bloque)';
   log('testRelay = ' + good);
-  if(!good) log('⚠ Relais refusé : identifiants expirés ou port 3478 bloqué sur ce réseau');
-  connect();
+
+  connect(code, role);
 }
 
-// Vérifie que le TURN accepte nos identifiants
-function testRelay(){
-  return new Promise(res => {
-    let done = false;
-    const pc = new RTCPeerConnection({ iceServers: ICE, iceTransportPolicy: 'relay' });
-    const fin = v => { if(!done){ done = true; pc.close(); res(v); } };
-    pc.onicecandidate = e => {
-      if(e.candidate && e.candidate.candidate.includes(' typ relay')){
-        log('cand: ' + e.candidate.address + ' ' + e.candidate.port + ' typ relay');
-        fin(true);
-      }
-    };
-    pc.onicecandidateerror = e => log('ICE ERROR ' + e.errorCode + ' ' + (e.url||''));
-    pc.createDataChannel('x');
-    pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => fin(false));
-    setTimeout(() => fin(false), 8000);
-  });
-}
+// Rôle 'a' = attend, rôle 'b' = appelle (et réessaie tant que l'autre n'est pas là)
+function connect(code, role){
+  const me = 'call-' + code + '-' + role;
+  const other = 'call-' + code + '-' + (role === 'a' ? 'b' : 'a');
 
-function connect(){
-  const me = 'call-' + myCode + '-' + myRole;
-  const other = 'call-' + myCode + '-' + (myRole === 'a' ? 'b' : 'a');
-
-  peer = new Peer(me, { config: { iceServers: ICE, iceTransportPolicy: 'all' } });
+  peer = new Peer(me, { config: { iceServers: ICE, iceTransportPolicy: 'relay' } });
 
   peer.on('open', id => {
     log('peer open: ' + id);
-    if(myRole === 'a') status('En attente de l’autre personne…');
-    else tryCall(other);
+    if(role === 'a'){
+      status('En attente de l\'autre personne…');
+    } else {
+      tryCall();
+    }
   });
 
   peer.on('call', c => {
     log('appel entrant');
-    if(call && call !== c) { try{ call.close(); }catch(e){} }
     c.answer(stream);
-    setCall(c, other);
+    setCall(c);
   });
 
-  peer.on('disconnected', () => {
-    log('signalisation déconnectée, reconnexion…');
-    if(!peer.destroyed) peer.reconnect();
-  });
+  function tryCall(){
+    if(ok || !peer || peer.destroyed) return;
+    status('Appel en cours…');
+    log('appel sortant vers ' + other);
+    setCall(peer.call(other, stream));
+    // si pas connecté après 25 s, on retente
+    retryTimer = setTimeout(() => {
+      if(!ok){
+        log('pas de connexion après 25 s → relance');
+        try{ call && call.close(); }catch(e){}
+        tryCall();
+      }
+    }, 25000);
+  }
 
   peer.on('error', e => {
-    log('erreur peer: ' + e.type);
+    log('peer error: ' + e.type);
     if(e.type === 'peer-unavailable'){
-      status('L’autre n’est pas encore là, nouvel essai…');
-      setTimeout(() => tryCall(other), 3000);
+      status('L\'autre n\'est pas encore là… nouvelle tentative');
+      if(role === 'b') setTimeout(tryCall, 3000);
     } else if(e.type === 'unavailable-id'){
-      status('Ancienne session encore active, nouvel essai…');
-      peer.destroy();
-      setTimeout(connect, 5000);
-    } else if(e.type === 'network' || e.type === 'server-error' || e.type === 'socket-error'){
-      status('Problème de signalisation, nouvel essai…');
-      setTimeout(() => { if(peer.destroyed) connect(); else peer.reconnect(); }, 4000);
-    } else status('Erreur : ' + e.type);
+      status('Ce code est déjà utilisé avec ce rôle. Changez de code.');
+    } else {
+      status('Erreur : ' + e.type);
+    }
   });
 }
 
-function tryCall(other){
-  if(ok || !peer || peer.destroyed || myRole !== 'b') return;
-  status('Appel en cours…');
-  log('appel sortant vers ' + other);
-  setCall(peer.call(other, stream), other);
-}
-
-function setCall(c, other){
-  if(!c) return;
+function setCall(c){
   call = c;
-  ok = false;
-  clearTimeout(retryTimer);
-
-  // Filet de sécurité : si pas connecté en 25 s, on relance
-  retryTimer = setTimeout(() => {
-    if(!ok){
-      log('pas de connexion après 25 s → relance');
-      status('Connexion trop lente, nouvel essai…');
-      try{ c.close(); }catch(e){}
-      if(myRole === 'b') setTimeout(() => tryCall(other), 2000);
-      else status('En attente d’un nouvel essai de l’autre…');
-    }
-  }, 25000);
-
-  setTimeout(() => {
-    const pc = c.peerConnection;
-    if(!pc) return log('pas de peerConnection');
-    pc.addEventListener('icecandidate', e => {
-      if(e.candidate) log('local: ' + e.candidate.address + ' ' + e.candidate.port + ' typ ' + e.candidate.type);
-    });
-    pc.addEventListener('icecandidateerror', e => log('ICE ERROR ' + e.errorCode + ' ' + (e.url||'')));
-    pc.addEventListener('iceconnectionstatechange', () => {
-      const st = pc.iceConnectionState;
-      log('ICE: ' + st);
-      if(st === 'connected' || st === 'completed'){
-        ok = true;
-        clearTimeout(retryTimer);
-        status('Connecté ✔');
-        limit(pc);
-        showPath(pc);
-      } else if(st === 'failed'){
-        status('Échec réseau, nouvel essai…');
-        clearTimeout(retryTimer);
-        try{ c.close(); }catch(e){}
-        if(myRole === 'b') setTimeout(() => tryCall(other), 2000);
-      } else if(st === 'disconnected'){
-        status('Connexion instable…');
-      } else status('Réseau : ' + st + ' …');
-    });
-  }, 0);
 
   c.on('stream', s => {
     log('flux distant reçu');
     const r = $('remote');
     r.srcObject = s;
-    r.play().catch(() => status('Touchez la vidéo pour activer le son'));
-    clearInterval(statsTimer);
+    r.play().catch(() => {});
+    limit(c.peerConnection);
+    watchIce(c.peerConnection);
+
+    if(statsTimer) clearInterval(statsTimer);
     statsTimer = setInterval(async () => {
       try{
         const st = await c.peerConnection.getStats();
@@ -209,40 +176,56 @@ function setCall(c, other){
             if(x.kind === 'audio') a = x.bytesReceived;
           }
         });
-        $('dbg').textContent = 'Reçu : vidéo ' + Math.round(v/1024) + ' Ko, audio ' + Math.round(a/1024) + ' Ko';
+        $('dbg').textContent = 'Reçu de l\'autre : vidéo ' + Math.round(v/1024) + ' Ko, audio ' + Math.round(a/1024) + ' Ko';
       }catch(e){}
     }, 2000);
   });
 
   c.on('close', () => {
     log('appel fermé');
-    if(ok){ ok = false; status('Appel terminé. Rechargez la page pour rappeler.'); }
+    status('Appel terminé. Rechargez la page pour rappeler.');
   });
+  c.on('error', e => log('call error: ' + e));
+
+  // Le 'stream' peut arriver avant que peerConnection existe : on branche ICE ici aussi
+  setTimeout(() => { if(c.peerConnection) watchIce(c.peerConnection); }, 0);
 }
 
-// Affiche le chemin utilisé (host = direct local, srflx = direct internet, relay = via TURN)
-async function showPath(pc){
+let watched = new WeakSet();
+function watchIce(pc){
+  if(!pc || watched.has(pc)) return;
+  watched.add(pc);
+  pc.addEventListener('iceconnectionstatechange', () => {
+    const st = pc.iceConnectionState;
+    log('ICE: ' + st);
+    if(st === 'connected' || st === 'completed'){
+      ok = true;
+      if(retryTimer) clearTimeout(retryTimer);
+      status('Connecté ✔ (touchez la vidéo pour activer le son)');
+    } else if(st === 'failed'){
+      status('Échec réseau (ICE failed). Rechargez et réessayez.');
+    } else if(st === 'disconnected'){
+      status('Connexion instable…');
+    } else {
+      status('Réseau : ' + st + ' …');
+    }
+  });
+  pc.addEventListener('icecandidateerror', e => log('ICE ERROR ' + e.errorCode + ' ' + (e.url||'')));
+}
+
+// Limite le débit vidéo (connexion faible) : ~40 kbit/s, audio prioritaire
+function limit(pc){
   try{
-    const st = await pc.getStats();
-    st.forEach(x => {
-      if(x.type === 'candidate-pair' && x.state === 'succeeded' && x.nominated){
-        const l = st.get(x.localCandidateId), r = st.get(x.remoteCandidateId);
-        log('chemin : ' + (l && l.candidateType) + ' → ' + (r && r.candidateType));
+    pc.getSenders().forEach(s => {
+      if(s.track && s.track.kind === 'video'){
+        const p = s.getParameters();
+        if(!p.encodings || !p.encodings.length) p.encodings = [{}];
+        p.encodings[0].maxBitrate = 40000;
+        p.encodings[0].maxFramerate = 8;
+        s.setParameters(p).catch(() => {});
       }
     });
   }catch(e){}
-}
-
-// Bride le débit : vidéo ~60 kbit/s, audio ~20 kbit/s
-function limit(pc){
-  pc.getSenders().forEach(s => {
-    if(!s.track) return;
-    const p = s.getParameters();
-    if(!p.encodings || !p.encodings.length) p.encodings = [{}];
-    if(s.track.kind === 'video'){ p.encodings[0].maxBitrate = 60000; p.encodings[0].maxFramerate = 10; }
-    else { p.encodings[0].maxBitrate = 20000; }
-    s.setParameters(p).catch(() => {});
-  });
 }
 
 function toggleCam(){
