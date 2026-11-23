@@ -32,6 +32,23 @@
 const $ = id => document.getElementById(id);
 let stream, peer, call;
 
+// === À REMPLIR : l'URL donnée par Metered (voir explications) ===
+// Exemple : 'https://MONAPP.metered.live/api/v1/turn/credentials?apiKey=MA_CLE'
+const TURN_API = '';
+
+// === OU (autre fournisseur, ex. ExpressTURN) : colle ici les infos du tableau de bord ===
+// urls : plusieurs adresses possibles séparées par des virgules
+const TURN_MANUAL = {
+  urls: 'turn:free.expressturn.com:3478, turn:free.expressturn.com:3478?transport=tcp',
+  username: '000000002110890657',
+  credential: 'bsEiTWwvTfHHRZ091mt4+Bq1omM='
+};
+
+let ICE = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' }
+];
+
 function status(t){ $('s').textContent = t; }
 
 async function start(role){
@@ -46,6 +63,21 @@ async function start(role){
   $('me').srcObject = stream;
   $('join').style.display='none';
   $('cam').style.display='block';
+  if(TURN_API){
+    try {
+      status('Chargement du relais…');
+      const r = await fetch(TURN_API);
+      ICE = ICE.concat(await r.json());
+    } catch(e){ status('Relais indisponible, on tente sans…'); }
+  } else if(TURN_MANUAL.urls){
+    ICE.push({
+      urls: TURN_MANUAL.urls.split(',').map(s => s.trim()),
+      username: TURN_MANUAL.username,
+      credential: TURN_MANUAL.credential
+    });
+  } else {
+    status('Attention : aucun relais configuré (TURN_API et TURN_MANUAL vides).');
+  }
   connect(code, role);
 }
 
@@ -55,7 +87,9 @@ let ok = false;
 function connect(code, role){
   const me = 'call-'+code+'-'+role;
   const other = 'call-'+code+'-'+(role === 'a' ? 'b' : 'a');
-  peer = new Peer(me);
+  peer = new Peer(me, {
+    config: { iceServers: ICE }
+  });
 
   function tryCall(){
     if(ok || peer.destroyed) return;
@@ -83,6 +117,15 @@ function connect(code, role){
 
 function setCall(c){
   call = c;
+  setTimeout(() => {
+    try {
+      const pc = c.peerConnection;
+      pc.addEventListener('iceconnectionstatechange', () => {
+        if(!ok) status('Réseau : ' + pc.iceConnectionState + ' …');
+        if(pc.iceConnectionState === 'failed') status('Échec réseau (ICE failed). Rechargez et réessayez.');
+      });
+    } catch(e){}
+  }, 0);
   c.on('stream', s => { ok = true; $('remote').srcObject = s; status('Connecté ✔'); limit(c.peerConnection); });
   c.on('close', () => status('Appel terminé. Rechargez la page pour rappeler.'));
 }
