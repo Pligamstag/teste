@@ -1,34 +1,3 @@
-Voici mon analyse, par ordre de probabilité, puis le code corrigé.
-Cause la plus probable
-Un bug de configuration PeerJS : le test local testRelay() passe, mais l'appel réel utilise un autre chemin. Dans PeerJS 1.5.4, peer.call() et c.answer() n'héritent de config que si vous le passez dans le constructeur de Peer, ce que vous faites. Mais PeerJS remplace iceServers par défaut s'il y a une config sans sdpSemantics, et surtout il n'applique pas iceTransportPolicy de manière fiable sur tous les navigateurs mobiles. Le point décisif est ailleurs :
-Les identifiants ExpressTURN gratuits sont à durée limitée, et vos identifiants sont publiés dans le code (donc publics). Le test testRelay() ne prouve qu'une chose : votre navigateur obtient une allocation. Il ne prouve pas que :
-
-l'autre personne, depuis son réseau, atteint free.expressturn.com:3478 en UDP (souvent bloqué sur mobile/Wi-Fi d'entreprise),
-les deux pairs ont une allocation en même temps (le quota gratuit est très restreint, et les comptes gratuits limitent les allocations simultanées).
-
-Avec iceTransportPolicy: 'relay', si un seul des deux côtés ne peut pas joindre le TURN, il n'y a aucun repli : ICE reste en checking puis passe en failed. C'est exactement votre symptôme.
-Réponses aux questions
-1. Pourquoi checking malgré les candidats relay ?
-Obtenir un candidat relay local ≠ pouvoir échanger des paquets avec l'autre relais. Il faut que les deux allocations existent et que les permissions TURN soient créées (ce qui dépend des candidats de l'autre côté). Si l'un des deux ne passe pas (UDP bloqué, quota, identifiants), les paires restent en checking.
-2. Expiration ExpressTURN ?
-Oui, c'est probable : le bouton « Refresh Credentials » indique que les identifiants sont temporaires. Les identifiants collés en dur finissent par être refusés. Le plan gratuit est aussi limité en bande passante/allocations. TCP sur 3478 fonctionne en principe, mais beaucoup de réseaux mobiles ne laissent passer que 443 : essayez turn:...:443?transport=tcp ou turns: si votre tableau de bord les fournit.
-3. PeerJS et appel entrant ?
-Oui, ça fonctionne : peer.on('call') + answer() utilise la même config. Pas de souci de ce côté. Un vrai problème est cependant la course de rôles : si b appelle pendant que a est encore en reconnexion, l'appel est perdu sans erreur claire. Vos retries gèrent partiellement ça.
-4. Solution plus robuste ?
-
-Metered.ca (plan gratuit, 50 Go/mois) avec l'API de credentials dynamiques : c'est le plus simple, votre code le gère déjà via TURN_API. À privilégier.
-Cloudflare Calls/TURN : très fiable, gratuit dans de larges limites, nécessite une petite fonction serveur (Netlify Function) pour générer les credentials.
-LiveKit Cloud : très robuste, mais plus lourd à intégrer.
-Copier-coller SDP : fonctionne sans serveur, mais ne résout pas le problème TURN/NAT.
-
-Corrections à appliquer
-
-Ne plus forcer relay en dur : utiliser all en premier, avec un repli relay. Cela permet le P2P direct quand c'est possible et évite l'échec total.
-Ajouter les ports 443/TCP et turns: si disponibles.
-Détecter l'échec et redémarrer l'ICE (restartIce), avec un bouton de diagnostic.
-Logger les candidats pour savoir quel côté échoue.
-Bouton « Forcer relais » pour tester les deux modes.
-
 <!doctype html>
 <html lang="fr">
 <head>
@@ -40,19 +9,15 @@ Bouton « Forcer relais » pour tester les deux modes.
   video{width:100%;max-width:480px;background:#000;border-radius:10px}
   #me{max-width:140px;position:absolute;right:16px;top:16px;opacity:.9}
   #box{position:relative;width:100%;max-width:480px}
-  input,button,select{font-size:16px;padding:10px;border-radius:8px;border:0}
+  input,button{font-size:16px;padding:10px;border-radius:8px;border:0}
   button{background:#e0457b;color:#fff}
   #s{font-size:14px;opacity:.8;text-align:center}
-  #log{font-size:11px;opacity:.6;max-width:480px;width:100%;white-space:pre-wrap;word-break:break-all;max-height:140px;overflow:auto;background:#1a1a1a;padding:6px;border-radius:6px}
+  #log{font-size:11px;opacity:.6;white-space:pre-wrap;max-width:480px;width:100%;max-height:160px;overflow:auto;background:#000;padding:6px;border-radius:6px}
 </style>
 </head>
 <body>
   <div id="join">
     <input id="code" placeholder="code secret (ex: nous2026)">
-    <select id="mode">
-      <option value="all">Auto (direct puis relais)</option>
-      <option value="relay">Forcer relais</option>
-    </select>
     <button onclick="start('a')">Je lance l'appel</button>
     <button onclick="start('b')">Je rejoins</button>
   </div>
@@ -69,40 +34,25 @@ Bouton « Forcer relais » pour tester les deux modes.
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
-let stream, peer, call, connected = false, retryTimer = null;
+let stream, peer, call, ok = false, retryTimer = null;
 
-// === Option 1 (recommandée) : Metered, credentials dynamiques ===
-// Ex : 'https://MONAPP.metered.live/api/v1/turn/credentials?apiKey=MA_CLE'
-const TURN_API = '';
+// ====== À REMPLIR : URL Metered (TURN Server → API key) ======
+const TURN_API = 'https://VOTREAPP.metered.live/api/v1/turn/credentials?apiKey=VOTRE_CLE';
 
-// === Option 2 : identifiants manuels (peuvent expirer !) ===
-// Ajoutez aussi les variantes 443 / turns: si votre fournisseur les donne.
-const TURN_MANUAL = {
-  urls: [
-    'turn:free.expressturn.com:3478',
-    'turn:free.expressturn.com:3478?transport=tcp',
-    'turn:free.expressturn.com:443?transport=tcp'
-  ],
-  username: '000000002110890657',
-  credential: 'bsEiTWwvTfHHRZ091mt4+Bq1omM='
-};
-
-let ICE = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' }
-];
+// Serveurs de base (toujours présents)
+let ICE = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 function status(t){ $('s').textContent = t; }
 function log(t){
-  const l = $('log');
-  l.textContent += new Date().toLocaleTimeString() + ' ' + t + '\n';
-  l.scrollTop = l.scrollHeight;
+  const d = new Date().toTimeString().slice(0,8);
+  $('log').textContent += d + ' ' + t + '\n';
+  $('log').scrollTop = 1e9;
 }
 
 async function start(role){
   const code = $('code').value.trim().toLowerCase().replace(/\W/g,'');
   if(code.length < 4) return status('Code trop court (4 caractères min).');
-  const policy = $('mode').value;
+
   try{
     stream = await navigator.mediaDevices.getUserMedia({
       video:{width:{ideal:160},height:{ideal:120},frameRate:{ideal:8,max:10}},
@@ -113,114 +63,119 @@ async function start(role){
   $('join').style.display='none';
   $('cam').style.display='block';
 
-  if(TURN_API){
-    try {
-      status('Chargement du relais…');
-      const r = await fetch(TURN_API);
-      ICE = ICE.concat(await r.json());
-    } catch(e){ status('Relais indisponible, on tente sans…'); log('TURN_API: '+e.message); }
-  } else if(TURN_MANUAL.username){
-    ICE.push({
-      urls: TURN_MANUAL.urls,
-      username: TURN_MANUAL.username,
-      credential: TURN_MANUAL.credential
-    });
-  } else {
-    status('Attention : aucun relais configuré.');
+  // 1) Récupère des identifiants TURN frais (jamais expirés)
+  status('Chargement du relais…');
+  try{
+    const r = await fetch(TURN_API, {cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const list = await r.json();
+    ICE = ICE.concat(list);
+    log('TURN chargé : ' + list.length + ' serveurs');
+  }catch(e){
+    log('TURN indisponible : ' + e.message);
+    status('Relais indisponible, on tente en direct…');
   }
 
-  $('relay').textContent = 'Test du relais…';
+  // 2) Vérifie qu'on obtient bien un candidat relay
   const good = await testRelay();
-  $('relay').textContent = good ? 'Relais : OK ✔' : 'Relais : REFUSÉ ✘ (identifiants expirés ou port bloqué ?)';
+  $('relay').textContent = good ? 'Relais : OK ✔' : 'Relais : REFUSÉ ✘ (clé Metered ou réseau)';
   log('testRelay = ' + good);
 
-  connect(code, role, policy);
+  connect(code, role);
 }
 
-// Teste que le TURN donne un candidat relay, et journalise tous les candidats
 function testRelay(){
   return new Promise(res => {
     let done = false;
     const pc = new RTCPeerConnection({ iceServers: ICE, iceTransportPolicy: 'relay' });
     const fin = v => { if(!done){ done = true; pc.close(); res(v); } };
     pc.onicecandidate = e => {
-      if(e.candidate){
-        log('cand: ' + e.candidate.candidate.split(' ').slice(4,8).join(' '));
-        if(e.candidate.candidate.includes(' typ relay')) fin(true);
-      }
+      if(!e.candidate) return;
+      log('cand: ' + e.candidate.candidate.split(' ').slice(4,8).join(' '));
+      if(e.candidate.candidate.includes(' typ relay')) fin(true);
     };
+    pc.onicecandidateerror = e => log('ICE ERROR ' + e.errorCode + ' ' + e.url);
     pc.createDataChannel('x');
     pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => fin(false));
-    setTimeout(() => fin(false), 6000);
+    setTimeout(() => fin(false), 8000);
   });
 }
 
-function connect(code, role, policy){
+// 3) 'a' attend, 'b' appelle et réessaie tant que ça ne marche pas
+function connect(code, role){
   const me = 'call-'+code+'-'+role;
   const other = 'call-'+code+'-'+(role === 'a' ? 'b' : 'a');
+
   peer = new Peer(me, {
-    config: { iceServers: ICE, iceTransportPolicy: policy, iceCandidatePoolSize: 2 }
+    config: { iceServers: ICE, iceTransportPolicy: 'all', iceCandidatePoolSize: 2 },
+    debug: 1
   });
 
   function tryCall(){
-    if(connected || peer.destroyed) return;
+    if(ok || peer.destroyed) return;
     status('Appel en cours…');
-    setCall(peer.call(other, stream));
+    log('j’appelle ' + other);
+    setCall(peer.call(other, stream), role, tryCall);
   }
 
-  peer.on('open', () => {
-    log('peer open: ' + me);
+  peer.on('open', id => {
+    log('peer open: ' + id);
     if(role === 'a') status('En attente de l’autre personne…');
     else tryCall();
   });
-  peer.on('call', c => { log('appel entrant'); c.answer(stream); setCall(c); });
-  peer.on('disconnected', () => { if(!peer.destroyed) peer.reconnect(); });
+  peer.on('call', c => { log('appel entrant'); c.answer(stream); setCall(c, role, tryCall); });
+  peer.on('disconnected', () => { log('signalisation perdue, reconnexion'); if(!peer.destroyed) peer.reconnect(); });
   peer.on('error', e => {
     log('peer error: ' + e.type);
     if(e.type === 'peer-unavailable'){
       status('L’autre n’est pas encore là, nouvel essai…');
-      clearTimeout(retryTimer);
-      retryTimer = setTimeout(tryCall, 3000);
+      clearTimeout(retryTimer); retryTimer = setTimeout(tryCall, 3000);
     } else if(e.type === 'unavailable-id'){
       status('Ancienne session encore active, nouvel essai…');
       peer.destroy();
-      setTimeout(() => connect(code, role, policy), 4000);
+      setTimeout(() => connect(code, role), 4000);
     } else status('Erreur : '+e.type);
   });
 }
 
-function setCall(c){
+function setCall(c, role, tryCall){
   if(call && call !== c){ try{ call.close(); }catch(e){} }
   call = c;
-  let failTimer = null;
+  ok = false;
 
-  // Attache les écouteurs dès que peerConnection existe
   const attach = () => {
     const pc = c.peerConnection;
-    if(!pc){ return setTimeout(attach, 50); }
+    if(!pc) return setTimeout(attach, 50);
+
     pc.addEventListener('icecandidate', e => {
       if(e.candidate) log('local: ' + e.candidate.candidate.split(' ').slice(4,8).join(' '));
     });
+    pc.addEventListener('icecandidateerror', e => log('ICE ERROR ' + e.errorCode + ' ' + e.url));
     pc.addEventListener('iceconnectionstatechange', () => {
       const st = pc.iceConnectionState;
       log('ICE: ' + st);
       if(st === 'connected' || st === 'completed'){
-        connected = true; clearTimeout(failTimer);
-        status('Connecté ✔ (réseau OK)');
+        ok = true; status('Connecté ✔');
+        showPath(pc);
       } else if(st === 'failed'){
-        status('Échec réseau (ICE failed). Tentative de redémarrage…');
-        try{ pc.restartIce(); }catch(e){}
+        ok = false;
+        status('Échec réseau, nouvelle tentative…');
+        // Filet de sécurité : b relance l'appel, a attend
+        try{ c.close(); }catch(e){}
+        if(role === 'b'){ clearTimeout(retryTimer); retryTimer = setTimeout(tryCall, 2000); }
       } else if(st === 'disconnected'){
         status('Connexion instable…');
       } else status('Réseau : ' + st + ' …');
     });
-    // Si bloqué en checking trop longtemps, on le dit clairement
-    failTimer = setTimeout(() => {
-      if(!connected){
-        status('Bloqué en "checking" depuis 25 s : l’autre côté n’atteint probablement pas le relais (essayez le mode Auto, ou un autre fournisseur TURN).');
-        log('timeout checking');
+
+    // Si bloqué en "checking" > 20 s → on relance plutôt que d'attendre
+    setTimeout(() => {
+      if(!ok && pc.iceConnectionState === 'checking'){
+        log('bloqué en checking → relance');
+        try{ c.close(); }catch(e){}
+        if(role === 'b'){ clearTimeout(retryTimer); retryTimer = setTimeout(tryCall, 1000); }
       }
-    }, 25000);
+    }, 20000);
   };
   attach();
 
@@ -229,7 +184,8 @@ function setCall(c){
     r.srcObject = s;
     limit(c.peerConnection);
     r.play().catch(() => {});
-    setInterval(async () => {
+    const iv = setInterval(async () => {
+      if(!c.peerConnection || c.peerConnection.signalingState === 'closed') return clearInterval(iv);
       try {
         const st = await c.peerConnection.getStats();
         let v = 0, a = 0;
@@ -243,8 +199,21 @@ function setCall(c){
       } catch(e){}
     }, 2000);
   });
-  c.on('close', () => { connected = false; status('Appel terminé. Rechargez la page pour rappeler.'); });
+  c.on('close', () => { if(ok){ ok = false; status('Appel terminé. Rechargez pour rappeler.'); } });
   c.on('error', e => log('call error: ' + e));
+}
+
+// Affiche le chemin réellement utilisé (direct ou relais)
+async function showPath(pc){
+  try{
+    const st = await pc.getStats();
+    st.forEach(s => {
+      if(s.type === 'candidate-pair' && s.state === 'succeeded' && s.nominated){
+        const l = st.get(s.localCandidateId), r = st.get(s.remoteCandidateId);
+        log('chemin : ' + (l && l.candidateType) + ' → ' + (r && r.candidateType));
+      }
+    });
+  }catch(e){}
 }
 
 function limit(pc){
@@ -265,4 +234,4 @@ function toggleCam(){
 }
 </script>
 </body>
-</htm
+</html>
