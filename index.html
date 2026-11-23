@@ -17,7 +17,8 @@
 <body>
   <div id="join">
     <input id="code" placeholder="code secret (ex: nous2026)">
-    <button onclick="start()">Appeler</button>
+    <button onclick="start('a')">Je lance l'appel</button>
+    <button onclick="start('b')">Je rejoins</button>
   </div>
   <div id="s">Mettez le même code tous les deux.</div>
   <div id="box">
@@ -33,7 +34,7 @@ let stream, peer, call;
 
 function status(t){ $('s').textContent = t; }
 
-async function start(){
+async function start(role){
   const code = $('code').value.trim().toLowerCase().replace(/\W/g,'');
   if(code.length < 4) return status('Code trop court (4 caractères min).');
   try{
@@ -45,30 +46,44 @@ async function start(){
   $('me').srcObject = stream;
   $('join').style.display='none';
   $('cam').style.display='block';
-  connect(code, 1);
+  connect(code, role);
 }
 
-function connect(code, n){
-  peer = new Peer('call-'+code+'-'+n);
+let ok = false;
+
+// Rôle 'a' = attend, rôle 'b' = appelle (et réessaie toutes les 3 s tant que l'autre n'est pas là)
+function connect(code, role){
+  const me = 'call-'+code+'-'+role;
+  const other = 'call-'+code+'-'+(role === 'a' ? 'b' : 'a');
+  peer = new Peer(me);
+
+  function tryCall(){
+    if(ok || peer.destroyed) return;
+    status('Appel en cours…');
+    setCall(peer.call(other, stream));
+  }
+
   peer.on('open', () => {
-    if(n === 1){
-      status('En attente de l’autre personne…');
-    } else {
-      status('Appel en cours…');
-      setCall(peer.call('call-'+code+'-1', stream));
-    }
+    if(role === 'a') status('En attente de l’autre personne…');
+    else tryCall();
   });
   peer.on('call', c => { c.answer(stream); setCall(c); });
+  peer.on('disconnected', () => { if(!peer.destroyed) peer.reconnect(); });
   peer.on('error', e => {
-    if(e.type === 'unavailable-id' && n === 1){ peer.destroy(); connect(code, 2); }
-    else if(e.type === 'peer-unavailable'){ status('Personne là-bas pour l’instant, nouvel essai…'); setTimeout(()=>{peer.destroy();connect(code,2)},4000); }
-    else status('Erreur : '+e.type);
+    if(e.type === 'peer-unavailable'){
+      status('L’autre n’est pas encore là, nouvel essai…');
+      setTimeout(tryCall, 3000);
+    } else if(e.type === 'unavailable-id'){
+      status('Ancienne session encore active, nouvel essai…');
+      peer.destroy();
+      setTimeout(() => connect(code, role), 4000);
+    } else status('Erreur : '+e.type);
   });
 }
 
 function setCall(c){
   call = c;
-  c.on('stream', s => { $('remote').srcObject = s; status('Connecté ✔'); limit(c.peerConnection); });
+  c.on('stream', s => { ok = true; $('remote').srcObject = s; status('Connecté ✔'); limit(c.peerConnection); });
   c.on('close', () => status('Appel terminé. Rechargez la page pour rappeler.'));
 }
 
