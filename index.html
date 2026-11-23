@@ -23,40 +23,39 @@ input:focus{border-color:var(--accent)}
 #link{word-break:break-all;font-size:12px;color:var(--accent);background:var(--bg);border-radius:8px;padding:8px}
 #status{font-size:13px;color:var(--mute);text-align:center;min-height:18px}
 #room{display:none;flex:1;flex-direction:column;min-height:0}
-#stage{flex:1;position:relative;background:#000;overflow:hidden;min-height:0}
+#stage{flex:1;position:relative;background:#000;min-height:0;overflow:hidden}
 #remote{width:100%;height:100%;object-fit:contain;background:#000}
-#waiting{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:18px;text-align:center;padding:20px}
-#self{position:absolute;width:180px;height:135px;right:14px;bottom:14px;background:#111;border-radius:12px;overflow:hidden;border:2px solid var(--line);cursor:grab;touch-action:none;z-index:5}
-#self video{width:100%;height:100%;object-fit:cover}
-#self .name{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.6);padding:2px 8px;border-radius:6px;font-size:12px}
+#waiting{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:15px;background:#111}
+#self{position:absolute;right:12px;bottom:12px;width:160px;height:120px;border-radius:14px;overflow:hidden;background:#2b2e36;border:2px solid #444;touch-action:none;cursor:move;z-index:5}
+#self video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 #self.off video{display:none}
-#self.off .avatar{display:flex}
-.avatar{display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:34px;font-weight:600;background:#2d3340}
-#bar{height:76px;display:flex;align-items:center;justify-content:center;gap:10px;padding:10px;background:var(--panel);border-top:1px solid var(--line);flex-wrap:wrap}
-#bar button{min-width:52px;height:52px;border-radius:50%;padding:0;font-size:20px}
-#bar button.hang{border-radius:26px;width:auto;padding:0 20px;background:var(--danger);color:#fff}
-#emojis{display:none;position:absolute;bottom:90px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px;gap:4px;flex-wrap:wrap;width:260px;z-index:20}
-#emojis.open{display:flex}
-#emojis button{width:44px;height:44px;font-size:22px;padding:0;border-radius:10px;background:transparent}
-#emojis button:hover{background:#3a3d45}
-.float{position:absolute;bottom:90px;font-size:36px;pointer-events:none;animation:up 2.3s ease-out forwards;z-index:30}
-@keyframes up{to{transform:translateY(-220px);opacity:0}}
-#chat{position:absolute;top:0;right:0;bottom:0;width:min(88vw,300px);background:var(--panel);border-left:1px solid var(--line);display:none;flex-direction:column;z-index:40}
-#chat.open{display:flex}
-#chatHead{padding:12px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
-#msgs{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
-.msg{background:#2f3239;border-radius:10px;padding:8px 10px;font-size:14px;word-wrap:break-word}
-.msg.me{background:var(--accent);color:#fff}
-.msg .who{font-size:11px;opacity:.7;margin-bottom:2px}
-#chatForm{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)}
-#toasts{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:100;width:min(92vw,340px)}
-.toast{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+#avatar{display:none;position:absolute;inset:0;align-items:center;justify-content:center;font-size:42px;font-weight:600;background:#3a3d45}
+#self.off #avatar{display:flex}
+#selfName{position:absolute;left:6px;bottom:6px;font-size:12px;background:rgba(0,0,0,.6);padding:2px 6px;border-radius:6px}
+#bar{display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap;padding:10px;background:var(--panel);border-top:1px solid var(--line)}
+#bar button{width:48px;height:48px;padding:0;font-size:20px;border-radius:50%}
+#bar button.wide{width:auto;height:48px;border-radius:24px;padding:0 16px;font-size:14px}
+#bar .leave{background:var(--danger);color:#fff;width:auto;border-radius:24px;padding:0 18px}
+#emojiPanel{display:none;gap:6px;flex-wrap:wrap;justify-content:center;padding:8px;background:var(--panel)}
+#emojiPanel button{width:44px;height:44px;font-size:22px;border-radius:10px;padding:0}
+#chat{display:none;flex-direction:column;position:absolute;right:0;top:0;bottom:0;width:min(88vw,300px);background:var(--panel);border-left:1px solid var(--line);z-index:20}
+#chatHead{padding:10px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line)}
+#msgs{flex:1;overflow:auto;padding:10px;font-size:14px;display:flex;flex-direction:column;gap:6px}
+#chatForm{display:flex;gap:6px;padding:8px;border-top:1px solid var(--line)}
+#chatForm input{padding:8px}
+#chatForm button{padding:8px 12px}
+.msg{background:var(--bg);border-radius:10px;padding:6px 10px}
+.msg b{color:var(--accent);font-size:12px;display:block}
+#toasts{position:fixed;top:12px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:50;width:min(92vw,360px)}
+.toast{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.4);font-size:14px}
 .toast .acts{display:flex;gap:8px;margin-top:8px}
 .toast .acts button{flex:1;padding:8px}
+.float{position:fixed;bottom:90px;font-size:34px;pointer-events:none;animation:up 2.2s ease-out forwards;z-index:60}
+@keyframes up{to{transform:translateY(-260px);opacity:0}}
 @media (max-width:600px){
-  #self{width:110px;height:82px}
-  #bar button{min-width:44px;height:44px;font-size:18px}
-  #bar button.hang{padding:0 14px}
+  #self{width:110px;height:84px}
+  #bar button{width:42px;height:42px;font-size:18px}
+  #bar button.wide{font-size:13px;padding:0 12px}
 }
 </style>
 </head>
@@ -66,47 +65,47 @@ input:focus{border-color:var(--accent)}
   <div class="card">
     <h1 style="text-align:center;margin:0;font-size:24px">Appel léger</h1>
     <input id="name" placeholder="Votre pseudo">
-    <button class="primary" onclick="createRoom()">🎬 Créer une réunion</button>
+    <button class="primary" onclick="createRoom()">Créer une réunion</button>
     <div id="inviteBox">
       <div class="muted">Partagez ce lien :</div>
       <div id="link"></div>
-      <button onclick="copyLink()">📋 Copier le lien</button>
+      <button onclick="copyLink()">Copier le lien</button>
     </div>
     <div class="muted">ou rejoindre avec un lien reçu :</div>
     <input id="code" placeholder="Code de la réunion">
-    <button onclick="requestJoin()">🙋 Demander à rejoindre</button>
+    <button onclick="requestJoin()">Demander à rejoindre</button>
     <div id="status"></div>
   </div>
 </div>
 
 <div id="room">
   <div id="stage">
-    <video id="remote" autoplay playsinline></video>
-    <div id="waiting">En attente de l'autre personne…</div>
+    <video id="remote" autoplay playsinline onclick="this.muted=false;this.play()"></video>
+    <div id="waiting">En attente de quelqu'un…</div>
     <div id="self">
-      <video id="me" autoplay muted playsinline></video>
-      <div class="avatar" id="avatar"></div>
-      <div class="name" id="selfName"></div>
+      <video id="me" autoplay playsinline muted></video>
+      <div id="avatar"></div>
+      <div id="selfName"></div>
     </div>
-    <div id="emojis"></div>
     <div id="chat">
-      <div id="chatHead"><b>💬 Chat</b><button onclick="toggleChat()">✖</button></div>
+      <div id="chatHead"><b>Chat</b><button onclick="toggleChat()">✖</button></div>
       <div id="msgs"></div>
       <form id="chatForm" onsubmit="sendChat(event)">
-        <input id="chatIn" placeholder="Message">
-        <button class="primary" type="submit">➤</button>
+        <input id="chatIn" placeholder="Message…">
+        <button class="primary">➤</button>
       </form>
     </div>
   </div>
+  <div id="emojiPanel"></div>
   <div id="bar">
     <button id="bMic" onclick="toggleMic()" title="Micro">🎤</button>
     <button id="bCam" onclick="toggleCam()" title="Caméra">📷</button>
-    <button onclick="toggleScreen()" title="Partage d'écran">🖥️</button>
-    <button onclick="toggleEmojis()" title="Émojis">😀</button>
+    <button class="wide" onclick="toggleScreen()" title="Partage d'écran">🖥️ Partager</button>
+    <button onclick="toggleEmoji()" title="Émojis">😀</button>
     <button onclick="toggleChat()" title="Chat">💬</button>
-    <button onclick="togglePiP()" title="Picture in picture">⧉</button>
+    <button onclick="togglePiP()" title="Picture-in-picture">⧉</button>
     <button onclick="toggleFull()" title="Plein écran">⛶</button>
-    <button class="hang" onclick="hangup()">📞 Quitter</button>
+    <button class="leave" onclick="hangup()">📞 Quitter</button>
   </div>
 </div>
 
@@ -116,29 +115,28 @@ input:focus{border-color:var(--accent)}
 <script>
 var $ = function(id){ return document.getElementById(id); };
 
-// Relais TURN Metered. Régénère ces identifiants : ils ont été partagés en clair.
+// Remplace par tes identifiants TURN (régénère-les, ils ont été partagés).
 var ICE = [
   { urls: 'stun:stun.relay.metered.ca:80' },
-  { urls: 'turn:global.relay.metered.ca:80', username: '403d8a7db25a819098d7d8c9', credential: 'go7c76Oi2qYbDGN1' },
-  { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: '403d8a7db25a819098d7d8c9', credential: 'go7c76Oi2qYbDGN1' },
-  { urls: 'turn:global.relay.metered.ca:443', username: '403d8a7db25a819098d7d8c9', credential: 'go7c76Oi2qYbDGN1' },
-  { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: '403d8a7db25a819098d7d8c9', credential: 'go7c76Oi2qYbDGN1' }
+  { urls: 'turn:global.relay.metered.ca:80', username: 'TON_USER', credential: 'TON_MDP' },
+  { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: 'TON_USER', credential: 'TON_MDP' },
+  { urls: 'turn:global.relay.metered.ca:443', username: 'TON_USER', credential: 'TON_MDP' },
+  { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: 'TON_USER', credential: 'TON_MDP' }
 ];
 var PEER_CFG = { config: { iceServers: ICE } };
-
 var EMOJIS = ['👍','👏','😂','😮','❤️','🎉','🙏','🔥'];
 
 var stream = null, screenStream = null, peer = null, call = null, conn = null;
 var myName = '', isHost = false, roomId = '';
 var pending = new Map();
 var micOn = true, camOn = true;
-var joinTimer = null;
+var retryTimer = null;
+var guests = [];
 
 var params = new URLSearchParams(location.search);
 if(params.get('room')) $('code').value = params.get('room');
 
 function status(t){ $('status').textContent = t; }
-
 function roomOf(s){ return String(s).trim().toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
 async function getMedia(){
@@ -170,24 +168,26 @@ async function createRoom(){
 
   peer = new Peer('room-' + roomId, PEER_CFG);
   peer.on('open', function(){
-    status('Réunion ouverte. Partagez le lien, en attente de quelqu\'un…');
+    status('Réunion ouverte. Partagez le lien, en attente…');
     showRoom();
   });
-  // Quelqu'un se connecte à la réunion : on attend sa demande
+  // Quelqu'un se connecte à la réunion : on reçoit sa demande
   peer.on('connection', function(c){
     c.on('data', function(d){
       if(d.t === 'join') showJoinRequest(c, d.name);
+      else if(d.t === 'chat' || d.t === 'emoji') handleData(d);
     });
     c.on('close', function(){
-      // si la demande est encore en attente, on la retire
       pending.forEach(function(v, k){
         if(v.conn === c){ pending.delete(k); var el = $(k); if(el) el.remove(); }
       });
     });
   });
-  // Appel entrant : on répond avec notre flux
   peer.on('call', function(c){ c.answer(stream); setCall(c); });
-  peer.on('error', function(e){ status('Erreur hôte : ' + e.type); });
+  peer.on('error', function(e){
+    if(e.type === 'unavailable-id') status('Code déjà utilisé, rechargez la page.');
+    else status('Erreur hôte : ' + e.type);
+  });
 }
 
 function copyLink(){
@@ -219,10 +219,6 @@ function showJoinRequest(c, name){
   acts.appendChild(no);
   t.appendChild(acts);
   $('toasts').appendChild(t);
-  // notification sonore / navigateur si autorisé
-  if(document.hidden && 'Notification' in window && Notification.permission === 'granted'){
-    new Notification('Appel léger', { body: name + ' veut rejoindre' });
-  }
 }
 
 function respond(id, accept){
@@ -234,10 +230,11 @@ function respond(id, accept){
   if(accept){
     conn = p.conn;
     conn.on('data', handleData);
-    p.conn.send({ t: 'accepted' });
-    // Seulement maintenant on appelle l'invité
-    var c = peer.call('room-' + roomId + '-guest-' + p.conn.peer, stream);
+    conn.send({ t: 'accepted' });
+    // L'hôte appelle l'invité, qui répond automatiquement
+    var c = peer.call(p.conn.peer, stream);
     setCall(c);
+    status('Connexion vidéo…');
   } else {
     p.conn.send({ t: 'refused' });
     setTimeout(function(){ p.conn.close(); }, 300);
@@ -250,38 +247,38 @@ async function requestJoin(){
   roomId = roomOf($('code').value);
   if(!myName){ status('Entrez un pseudo.'); return; }
   if(roomId.length < 4){ status('Code invalide.'); return; }
-  status('Connexion…');
+  status('Préparation…');
   try { await getMedia(); } catch(e){ status('Caméra/micro refusés : ' + e.message); return; }
 
   peer = new Peer(PEER_CFG);
   peer.on('open', function(){ tryConnect(); });
-  // L'hôte nous appelle après acceptation
   peer.on('call', function(c){ c.answer(stream); setCall(c); });
   peer.on('error', function(e){ status('Erreur : ' + e.type); });
 }
 
 function tryConnect(){
-  if(conn && conn.open) return;
-  status('Connexion à la réunion…');
+  if(call) return;
+  status('Demande en cours…');
   conn = peer.connect('room-' + roomId, { reliable: true });
+  var opened = false;
   conn.on('open', function(){
+    opened = true;
     status('Demande envoyée, en attente de l\'hôte…');
     conn.send({ t: 'join', name: myName });
   });
   conn.on('data', handleData);
-  conn.on('close', function(){
-    if(!call) status('Réunion introuvable ou fermée.');
-  });
-  conn.on('error', function(){ });
-  // si l'hôte n'est pas encore là, on réessaie
-  clearTimeout(joinTimer);
-  joinTimer = setTimeout(function(){
-    if(!call && (!conn || !conn.open)){
-      try { conn.close(); } catch(e){}
-      status('Hôte pas encore là, nouvel essai…');
-      setTimeout(tryConnect, 2500);
-    }
-  }, 6000);
+  conn.on('close', function(){ if(!call) retryLater(); });
+  conn.on('error', function(){ retryLater(); });
+  setTimeout(function(){
+    if(!opened && !call){ try{ conn.close(); }catch(e){} retryLater(); }
+  }, 5000);
+}
+
+function retryLater(){
+  if(call) return;
+  status('Réunion pas encore disponible, nouvel essai…');
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(tryConnect, 2500);
 }
 
 function handleData(d){
@@ -353,30 +350,22 @@ async function toggleScreen(){
     screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
     var track = screenStream.getVideoTracks()[0];
     if(sender) sender.replaceTrack(track);
-    track.onended = function(){
-      screenStream = null;
-      var cam2 = stream && stream.getVideoTracks()[0];
-      if(sender && cam2) sender.replaceTrack(cam2);
-    };
+    track.onended = function(){ toggleScreen(); };
+    status('Partage d\'écran en cours.');
   } catch(e){ status('Partage annulé.'); }
 }
 
-function toggleEmojis(){
-  var box = $('emojis');
-  if(!box.childElementCount){
-    EMOJIS.forEach(function(e){
-      var b = document.createElement('button');
-      b.textContent = e;
-      b.onclick = function(){ sendEmoji(e); };
-      box.appendChild(b);
-    });
-  }
-  box.classList.toggle('open');
-}
-
-function sendEmoji(e){
-  send({ t: 'emoji', v: e });
-  showFloat(e);
+function toggleEmoji(){
+  var p = $('emojiPanel');
+  if(p.style.display === 'flex'){ p.style.display = 'none'; return; }
+  p.innerHTML = '';
+  EMOJIS.forEach(function(e){
+    var b = document.createElement('button');
+    b.textContent = e;
+    b.onclick = function(){ showFloat(e); send({ t: 'emoji', v: e }); };
+    p.appendChild(b);
+  });
+  p.style.display = 'flex';
 }
 
 function showFloat(e){
@@ -384,11 +373,15 @@ function showFloat(e){
   f.className = 'float';
   f.textContent = e;
   f.style.left = (20 + Math.random() * 60) + '%';
-  $('stage').appendChild(f);
-  setTimeout(function(){ f.remove(); }, 2300);
+  document.body.appendChild(f);
+  setTimeout(function(){ f.remove(); }, 2200);
 }
 
-function toggleChat(){ $('chat').classList.toggle('open'); }
+function toggleChat(){
+  var c = $('chat');
+  c.style.display = c.style.display === 'flex' ? 'none' : 'flex';
+  if(c.style.display === 'flex') $('chatIn').focus();
+}
 
 function sendChat(e){
   e.preventDefault();
@@ -399,13 +392,12 @@ function sendChat(e){
   $('chatIn').value = '';
 }
 
-function addMsg(name, text, me){
+function addMsg(name, text, mine){
   var d = document.createElement('div');
-  d.className = 'msg' + (me ? ' me' : '');
-  var w = document.createElement('div');
-  w.className = 'who';
-  w.textContent = me ? 'Vous' : name;
-  d.appendChild(w);
+  d.className = 'msg';
+  var b = document.createElement('b');
+  b.textContent = mine ? 'Moi' : name;
+  d.appendChild(b);
   d.appendChild(document.createTextNode(text));
   $('msgs').appendChild(d);
   $('msgs').scrollTop = $('msgs').scrollHeight;
