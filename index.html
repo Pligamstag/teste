@@ -18,18 +18,25 @@ input{font:inherit;padding:12px 14px;border-radius:10px;border:1px solid var(--l
 .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:24px;width:min(420px,100%);display:flex;flex-direction:column;gap:12px}
 .muted{color:var(--mute);font-size:14px}
 #status{font-size:14px;color:var(--mute);min-height:20px;text-align:center}
+#inviteBox{display:none;flex-direction:column;gap:8px}
+#code_out{font-family:monospace;font-size:22px;text-align:center;letter-spacing:2px;padding:10px;background:var(--bg);border-radius:10px}
 #call{flex:1;display:none;flex-direction:column;min-height:0}
-#stage{flex:1;position:relative;background:#000;overflow:hidden;display:grid;gap:4px;padding:4px}
+#stage{flex:1;position:relative;background:#000;overflow:hidden;display:grid;gap:4px;padding:4px;min-height:0}
 .tile{position:relative;background:#2c2f36;border-radius:10px;overflow:hidden;min-height:0}
 .tile video{width:100%;height:100%;object-fit:contain;background:#000}
 .tile .label{position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.6);padding:2px 8px;border-radius:6px;font-size:12px}
-.tile .avatar{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:40px;font-weight:700}
-#self{position:absolute;right:12px;bottom:12px;width:min(28vw,220px);aspect-ratio:4/3;z-index:5;cursor:move;touch-action:none;border:2px solid var(--line)}
-#bar{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;padding:14px;background:var(--panel);border-top:1px solid var(--line)}
-#bar button{width:52px;height:52px;border-radius:50%;padding:0;font-size:22px}
-#chat{position:absolute;left:12px;bottom:12px;width:min(300px,60vw);max-height:40vh;display:none;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:12px;z-index:6}
-#chatLog{flex:1;overflow:auto;padding:8px;font-size:14px}
-#chatIn{border-radius:0 0 12px 12px;border:0;border-top:1px solid var(--line)}
+.tile .avatar{position:absolute;inset:0;display:none;align-items:center;justify-content:center;font-size:48px;background:#2c2f36}
+#selfTile{position:absolute;right:16px;bottom:16px;width:200px;height:150px;z-index:5;cursor:grab;border:2px solid var(--line);display:block}
+#selfTile video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#controls{display:flex;justify-content:center;gap:10px;padding:12px;flex-wrap:wrap;background:var(--panel)}
+#controls button{width:52px;height:52px;border-radius:50%;font-size:20px;padding:0}
+#controls button.end{width:auto;border-radius:26px;padding:0 20px;font-size:15px}
+#chat{position:fixed;right:0;top:0;bottom:0;width:min(320px,100%);background:var(--panel);border-left:1px solid var(--line);display:none;flex-direction:column;z-index:10}
+#chatLog{flex:1;overflow:auto;padding:12px;font-size:14px;display:flex;flex-direction:column;gap:8px}
+#chatForm{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)}
+#chatForm input{padding:8px 10px}
+#emojis{display:flex;flex-wrap:wrap;gap:4px;padding:8px;justify-content:center;background:var(--panel)}
+#emojis button{width:40px;height:40px;padding:0;font-size:20px;border-radius:10px}
 </style>
 </head>
 <body>
@@ -39,9 +46,9 @@ input{font:inherit;padding:12px 14px;border-radius:10px;border:1px solid var(--l
     <h1 style="text-align:center;margin:0">Appel léger</h1>
     <input id="name" placeholder="Votre pseudo">
     <button class="primary" onclick="createRoom()">Créer une réunion</button>
-    <div id="inviteBox" style="display:none">
-      <div class="muted">Partagez ce code :</div>
-      <div id="code_out" style="font-size:22px;font-weight:700;text-align:center;letter-spacing:2px"></div>
+    <div id="inviteBox">
+      <div class="muted">Code de la réunion :</div>
+      <div id="code_out"></div>
       <button onclick="copyCode()">Copier le code</button>
     </div>
     <div class="muted">ou rejoindre avec un code :</div>
@@ -53,44 +60,55 @@ input{font:inherit;padding:12px 14px;border-radius:10px;border:1px solid var(--l
 
 <div id="call">
   <div id="stage">
-    <div class="tile" id="selfTile" style="position:absolute;right:12px;bottom:12px;width:min(28vw,220px);aspect-ratio:4/3;z-index:5">
-      <video id="localVideo" autoplay playsinline muted style="transform:scaleX(-1)"></video>
+    <div id="selfTile" class="tile">
+      <video id="localVideo" autoplay playsinline muted></video>
       <div class="avatar" id="selfAvatar"></div>
       <div class="label" id="selfName"></div>
     </div>
   </div>
-  <div id="chat">
-    <div id="chatLog"></div>
-    <input id="chatIn" placeholder="Message…" onkeydown="if(event.key==='Enter')sendChat()">
+  <div id="emojis">
+    <button onclick="react('👍')">👍</button>
+    <button onclick="react('❤️')">❤️</button>
+    <button onclick="react('😂')">😂</button>
+    <button onclick="react('😮')">😮</button>
+    <button onclick="react('👏')">👏</button>
+    <button onclick="react('🎉')">🎉</button>
   </div>
-  <div id="bar">
+  <div id="controls">
     <button id="bMic" onclick="toggleMic()" title="Micro">🎤</button>
     <button id="bCam" onclick="toggleCam()" title="Caméra">📷</button>
-    <button id="bScreen" onclick="toggleScreen()" title="Partager l'écran">🖥️</button>
+    <button onclick="toggleScreen()" title="Partage d'écran">🖥️</button>
     <button onclick="toggleChat()" title="Chat">💬</button>
     <button onclick="toggleFull()" title="Plein écran">⛶</button>
-    <button onclick="react('😀')" title="Emoji">😀</button>
-    <button onclick="react('👍')" title="Emoji">👍</button>
-    <button class="danger" onclick="hangup()" title="Quitter">📞</button>
+    <button class="danger end" onclick="hangup()">Quitter</button>
   </div>
+  <div id="status" style="position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:20"></div>
+</div>
+
+<div id="chat">
+  <div id="chatLog"></div>
+  <form id="chatForm" onsubmit="event.preventDefault();sendChat()">
+    <input id="chatIn" placeholder="Message…">
+    <button class="primary" type="submit">Envoyer</button>
+  </form>
 </div>
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 
-// Remplace par tes propres identifiants TURN (ceux partagés plus haut sont compromis)
 const ICE = [
   { urls: 'stun:stun.relay.metered.ca:80' },
   { urls: 'turn:TON_SERVEUR.metered.live:80', username: 'TON_USER', credential: 'TON_MDP' },
   { urls: 'turn:TON_SERVEUR.metered.live:443?transport=tcp', username: 'TON_USER', credential: 'TON_MDP' }
 ];
-const PEER_OPTS = { config: { iceServers: ICE } };
+const PEER_OPTS = { config: { iceServers: ICE }, debug: 1 };
 
 let peer, stream, screenStream, myName, roomId, isHost = false;
 const calls = new Map();   // id -> { call, tile }
 const names = new Map();   // id -> pseudo
-let hostConn = null;       // invité : connexion data vers l'hôte
+const conns = new Map();   // hôte : id -> connexion data
+let hostConn = null;
 
 function status(t){ $('status').textContent = t; }
 function cleanCode(c){ return c.trim().toLowerCase().replace(/[^a-z0-9]/g, ''); }
@@ -109,9 +127,10 @@ async function getMedia(){
 function showCall(){
   $('join').style.display = 'none';
   $('call').style.display = 'flex';
+  $('call').style.flexDirection = 'column';
+  $('call').style.flex = '1';
 }
 
-// ===== Tuiles vidéo =====
 function addTile(id, name){
   if(calls.has(id)) return calls.get(id).tile;
   const t = document.createElement('div');
@@ -145,23 +164,27 @@ async function createRoom(){
   peer.on('open', () => {
     $('code_out').textContent = roomId;
     $('inviteBox').style.display = 'flex';
-    status('Réunion créée. En attente…');
+    status('Réunion créée. Code : ' + roomId);
     showCall();
   });
-  // Chaque invité ouvre une connexion data (pseudo) puis un appel vidéo
   peer.on('connection', c => {
+    conns.set(c.peer, c);
     c.on('data', d => {
-      if(d.t === 'hello'){ names.set(c.peer, d.name); }
-      if(d.t === 'chat'){ addChat(d.name, d.text); broadcast(d); }
-      if(d.t === 'react'){ flash(d.name + ' ' + d.e); }
+      if(d.t === 'hello') names.set(c.peer, d.name);
+      if(d.t === 'chat'){ addChat(d.name, d.text); relay(d, c.peer); }
+      if(d.t === 'react'){ flash(d.name + ' ' + d.e); relay(d, c.peer); }
     });
-    c.on('close', () => { removeTile(c.peer); });
+    c.on('close', () => { conns.delete(c.peer); removeTile(c.peer); });
   });
-  peer.on('call', c => {
-    c.answer(stream);
-    wireCall(c);
-  });
-  peer.on('error', e => status('Erreur : ' + e.type));
+  peer.on('call', c => { c.answer(stream); wireCall(c); });
+  peer.on('error', e => status('Erreur hôte : ' + e.type));
+}
+
+// L'hôte renvoie un message reçu à tous les autres invités
+function relay(msg, fromId){
+  for(const [id, c] of conns){
+    if(id !== fromId && c.open) c.send(msg);
+  }
 }
 
 // ===== Invité =====
@@ -175,27 +198,29 @@ async function joinRoom(){
 
   peer = new Peer(PEER_OPTS);
   peer.on('open', () => {
-    hostConn = peer.connect('room-' + roomId, { reliable: true });
+    const target = 'room-' + roomId;
+    hostConn = peer.connect(target, { reliable: true });
     hostConn.on('open', () => {
       hostConn.send({ t: 'hello', name: myName });
-      const c = peer.call('room-' + roomId, stream);
+      const c = peer.call(target, stream);
       wireCall(c);
-      status('');
       showCall();
+      status('');
     });
     hostConn.on('data', d => {
       if(d.t === 'chat') addChat(d.name, d.text);
       if(d.t === 'react') flash(d.name + ' ' + d.e);
     });
-    hostConn.on('error', e => status('Erreur : ' + e.type));
+    hostConn.on('error', e => status('Erreur connexion : ' + e.type));
   });
   peer.on('call', c => { c.answer(stream); wireCall(c); });
   peer.on('error', e => {
-    status(e.type === 'peer-unavailable' ? 'Réunion introuvable.' : 'Erreur : ' + e.type);
+    status(e.type === 'peer-unavailable'
+      ? 'Réunion introuvable : vérifie le code et que l’hôte est bien connecté.'
+      : 'Erreur : ' + e.type);
   });
 }
 
-// Gère un appel (hôte ou invité) : une tuile par correspondant
 function wireCall(c){
   const id = c.peer;
   const tile = addTile(id, names.get(id) || 'Invité');
@@ -210,9 +235,6 @@ function wireCall(c){
 }
 
 // ===== Chat et réactions =====
-function broadcast(msg){
-  if(isHost) for(const [, e] of calls){ /* relayé via data conns ci-dessous */ }
-}
 function sendChat(){
   const text = $('chatIn').value.trim();
   if(!text) return;
@@ -225,11 +247,8 @@ function react(e){
   sendData({ t: 'react', name: myName, e });
 }
 function sendData(msg){
-  if(isHost){
-    peer._connections && Object.values(peer._connections).flat().forEach(c => c.send && c.send(msg));
-  } else if(hostConn && hostConn.open){
-    hostConn.send(msg);
-  }
+  if(isHost) relay(msg, null);
+  else if(hostConn && hostConn.open) hostConn.send(msg);
 }
 function addChat(name, text){
   const d = document.createElement('div');
