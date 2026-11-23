@@ -21,8 +21,10 @@
     <button onclick="start('b')">Je rejoins</button>
   </div>
   <div id="s">Mettez le même code tous les deux.</div>
+  <div id="relay" style="font-size:13px"></div>
+  <div id="dbg" style="font-size:12px;opacity:.6"></div>
   <div id="box">
-    <video id="remote" autoplay playsinline></video>
+    <video id="remote" autoplay playsinline onclick="this.muted=false;this.play()"></video>
     <video id="me" autoplay playsinline muted></video>
   </div>
   <button id="cam" onclick="toggleCam()" style="display:none">Couper la vidéo (audio seul)</button>
@@ -78,7 +80,25 @@ async function start(role){
   } else {
     status('Attention : aucun relais configuré (TURN_API et TURN_MANUAL vides).');
   }
+  if(TURN_API || TURN_MANUAL.urls){
+    $('relay').textContent = 'Test du relais…';
+    const good = await testRelay();
+    $('relay').textContent = good ? 'Relais : OK ✔' : 'Relais : REFUSÉ ✘ (identifiants invalides ou expirés ?)';
+  }
   connect(code, role);
+}
+
+// Vérifie que le serveur TURN accepte nos identifiants (cherche un candidat "relay")
+function testRelay(){
+  return new Promise(res => {
+    let done = false;
+    const pc = new RTCPeerConnection({ iceServers: ICE, iceTransportPolicy: 'relay' });
+    const fin = v => { if(!done){ done = true; pc.close(); res(v); } };
+    pc.onicecandidate = e => { if(e.candidate && e.candidate.candidate.includes(' typ relay')) fin(true); };
+    pc.createDataChannel('x');
+    pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => fin(false));
+    setTimeout(() => fin(false), 6000);
+  });
 }
 
 let ok = false;
@@ -121,12 +141,32 @@ function setCall(c){
     try {
       const pc = c.peerConnection;
       pc.addEventListener('iceconnectionstatechange', () => {
-        if(!ok) status('Réseau : ' + pc.iceConnectionState + ' …');
-        if(pc.iceConnectionState === 'failed') status('Échec réseau (ICE failed). Rechargez et réessayez.');
+        const st = pc.iceConnectionState;
+        if(st === 'connected' || st === 'completed'){ ok = true; status('Connecté ✔ (réseau OK)'); }
+        else if(st === 'failed') status('Échec réseau (ICE failed). Rechargez et réessayez.');
+        else status('Réseau : ' + st + ' …');
       });
     } catch(e){}
   }, 0);
-  c.on('stream', s => { ok = true; $('remote').srcObject = s; status('Connecté ✔'); limit(c.peerConnection); });
+  c.on('stream', s => {
+    const r = $('remote');
+    r.srcObject = s;
+    limit(c.peerConnection);
+    r.play().catch(() => {});
+    setInterval(async () => {
+      try {
+        const st = await c.peerConnection.getStats();
+        let v = 0, a = 0;
+        st.forEach(x => {
+          if(x.type === 'inbound-rtp'){
+            if(x.kind === 'video') v = x.bytesReceived;
+            if(x.kind === 'audio') a = x.bytesReceived;
+          }
+        });
+        $('dbg').textContent = 'Reçu de l’autre : vidéo ' + Math.round(v/1024) + ' Ko, audio ' + Math.round(a/1024) + ' Ko';
+      } catch(e){}
+    }, 2000);
+  });
   c.on('close', () => status('Appel terminé. Rechargez la page pour rappeler.'));
 }
 
