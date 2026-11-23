@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Appel léger</title>
+<style>
+  body{margin:0;font-family:system-ui,sans-serif;background:#111;color:#eee;display:flex;flex-direction:column;align-items:center;gap:10px;padding:12px}
+  video{width:100%;max-width:480px;background:#000;border-radius:10px}
+  #me{max-width:140px;position:absolute;right:16px;top:16px;opacity:.9}
+  #box{position:relative;width:100%;max-width:480px}
+  input,button{font-size:16px;padding:10px;border-radius:8px;border:0}
+  button{background:#e0457b;color:#fff}
+  #s{font-size:14px;opacity:.8;text-align:center}
+</style>
+</head>
+<body>
+  <div id="join">
+    <input id="code" placeholder="code secret (ex: nous2026)">
+    <button onclick="start()">Appeler</button>
+  </div>
+  <div id="s">Mettez le même code tous les deux.</div>
+  <div id="box">
+    <video id="remote" autoplay playsinline></video>
+    <video id="me" autoplay playsinline muted></video>
+  </div>
+  <button id="cam" onclick="toggleCam()" style="display:none">Couper la vidéo (audio seul)</button>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let stream, peer, call;
+
+function status(t){ $('s').textContent = t; }
+
+async function start(){
+  const code = $('code').value.trim().toLowerCase().replace(/\W/g,'');
+  if(code.length < 4) return status('Code trop court (4 caractères min).');
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{width:{ideal:160},height:{ideal:120},frameRate:{ideal:8,max:10}},
+      audio:{echoCancellation:true,noiseSuppression:true,channelCount:1}
+    });
+  }catch(e){ return status('Caméra/micro refusés : '+e.message); }
+  $('me').srcObject = stream;
+  $('join').style.display='none';
+  $('cam').style.display='block';
+  connect(code, 1);
+}
+
+function connect(code, n){
+  peer = new Peer('call-'+code+'-'+n);
+  peer.on('open', () => {
+    if(n === 1){
+      status('En attente de l’autre personne…');
+    } else {
+      status('Appel en cours…');
+      setCall(peer.call('call-'+code+'-1', stream));
+    }
+  });
+  peer.on('call', c => { c.answer(stream); setCall(c); });
+  peer.on('error', e => {
+    if(e.type === 'unavailable-id' && n === 1){ peer.destroy(); connect(code, 2); }
+    else if(e.type === 'peer-unavailable'){ status('Personne là-bas pour l’instant, nouvel essai…'); setTimeout(()=>{peer.destroy();connect(code,2)},4000); }
+    else status('Erreur : '+e.type);
+  });
+}
+
+function setCall(c){
+  call = c;
+  c.on('stream', s => { $('remote').srcObject = s; status('Connecté ✔'); limit(c.peerConnection); });
+  c.on('close', () => status('Appel terminé. Rechargez la page pour rappeler.'));
+}
+
+// Bride le débit : vidéo ~60 kbit/s, audio ~20 kbit/s
+function limit(pc){
+  pc.getSenders().forEach(s => {
+    if(!s.track) return;
+    const p = s.getParameters();
+    if(!p.encodings || !p.encodings.length) p.encodings = [{}];
+    if(s.track.kind === 'video'){ p.encodings[0].maxBitrate = 60000; p.encodings[0].maxFramerate = 10; }
+    else { p.encodings[0].maxBitrate = 20000; }
+    s.setParameters(p).catch(()=>{});
+  });
+}
+
+function toggleCam(){
+  const v = stream.getVideoTracks()[0];
+  v.enabled = !v.enabled;
+  $('cam').textContent = v.enabled ? 'Couper la vidéo (audio seul)' : 'Remettre la vidéo';
+}
+</script>
+</body>
+</html>
