@@ -17,7 +17,6 @@ button.ok{background:var(--ok);color:#fff}
 input{font:inherit;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);width:100%;outline:none}
 input:focus{border-color:var(--accent)}
 #join{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px 16px}
-#join h1{margin:0;font-size:24px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:12px;width:min(92vw,380px)}
 .muted{color:var(--mute);font-size:13px;text-align:center}
 #inviteBox{display:none;flex-direction:column;gap:8px}
@@ -26,6 +25,7 @@ input:focus{border-color:var(--accent)}
 #room{display:none;flex:1;flex-direction:column;min-height:0}
 #stage{flex:1;position:relative;background:#000;overflow:hidden;min-height:0}
 #remote{width:100%;height:100%;object-fit:contain;background:#000}
+#waiting{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--mute);font-size:18px;text-align:center;padding:20px}
 #self{position:absolute;width:180px;height:135px;right:14px;bottom:14px;background:#111;border-radius:12px;overflow:hidden;border:2px solid var(--line);cursor:grab;touch-action:none;z-index:5}
 #self video{width:100%;height:100%;object-fit:cover}
 #self .name{position:absolute;left:6px;bottom:6px;background:rgba(0,0,0,.6);padding:2px 8px;border-radius:6px;font-size:12px}
@@ -49,7 +49,6 @@ input:focus{border-color:var(--accent)}
 .msg.me{background:var(--accent);color:#fff}
 .msg .who{font-size:11px;opacity:.7;margin-bottom:2px}
 #chatForm{display:flex;gap:6px;padding:10px;border-top:1px solid var(--line)}
-#chatForm button{padding:10px 14px}
 #toasts{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:100;width:min(92vw,340px)}
 .toast{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
 .toast .acts{display:flex;gap:8px;margin-top:8px}
@@ -65,17 +64,17 @@ input:focus{border-color:var(--accent)}
 
 <div id="join">
   <div class="card">
-    <h1 style="text-align:center;margin:0">Appel léger</h1>
+    <h1 style="text-align:center;margin:0;font-size:24px">Appel léger</h1>
     <input id="name" placeholder="Votre pseudo">
-    <button class="primary" onclick="createRoom()">Créer une réunion</button>
+    <button class="primary" onclick="createRoom()">🎬 Créer une réunion</button>
     <div id="inviteBox">
       <div class="muted">Partagez ce lien :</div>
       <div id="link"></div>
-      <button onclick="copyLink()">Copier le lien</button>
+      <button onclick="copyLink()">📋 Copier le lien</button>
     </div>
     <div class="muted">ou rejoindre avec un lien reçu :</div>
     <input id="code" placeholder="Code de la réunion">
-    <button onclick="requestJoin()">Demander à rejoindre</button>
+    <button onclick="requestJoin()">🙋 Demander à rejoindre</button>
     <div id="status"></div>
   </div>
 </div>
@@ -83,6 +82,7 @@ input:focus{border-color:var(--accent)}
 <div id="room">
   <div id="stage">
     <video id="remote" autoplay playsinline></video>
+    <div id="waiting">En attente de l'autre personne…</div>
     <div id="self">
       <video id="me" autoplay muted playsinline></video>
       <div class="avatar" id="avatar"></div>
@@ -90,23 +90,23 @@ input:focus{border-color:var(--accent)}
     </div>
     <div id="emojis"></div>
     <div id="chat">
-      <div id="chatHead"><b>Chat</b><button onclick="toggleChat()">X</button></div>
+      <div id="chatHead"><b>💬 Chat</b><button onclick="toggleChat()">✖</button></div>
       <div id="msgs"></div>
       <form id="chatForm" onsubmit="sendChat(event)">
         <input id="chatIn" placeholder="Message">
-        <button class="primary" type="submit">Envoyer</button>
+        <button class="primary" type="submit">➤</button>
       </form>
     </div>
   </div>
   <div id="bar">
-    <button id="bMic" onclick="toggleMic()" title="Micro">M</button>
-    <button id="bCam" onclick="toggleCam()" title="Caméra">C</button>
-    <button onclick="toggleScreen()" title="Partage d'écran">E</button>
-    <button onclick="toggleEmojis()" title="Émojis">:)</button>
-    <button onclick="toggleChat()" title="Chat">Chat</button>
-    <button onclick="togglePiP()" title="Picture in picture">PiP</button>
-    <button onclick="toggleFull()" title="Plein écran">Full</button>
-    <button class="hang" onclick="hangup()">Quitter</button>
+    <button id="bMic" onclick="toggleMic()" title="Micro">🎤</button>
+    <button id="bCam" onclick="toggleCam()" title="Caméra">📷</button>
+    <button onclick="toggleScreen()" title="Partage d'écran">🖥️</button>
+    <button onclick="toggleEmojis()" title="Émojis">😀</button>
+    <button onclick="toggleChat()" title="Chat">💬</button>
+    <button onclick="togglePiP()" title="Picture in picture">⧉</button>
+    <button onclick="toggleFull()" title="Plein écran">⛶</button>
+    <button class="hang" onclick="hangup()">📞 Quitter</button>
   </div>
 </div>
 
@@ -116,7 +116,7 @@ input:focus{border-color:var(--accent)}
 <script>
 var $ = function(id){ return document.getElementById(id); };
 
-// Relais TURN Metered (identifiants à régénérer si tu les as partagés)
+// Relais TURN Metered. Régénère ces identifiants : ils ont été partagés en clair.
 var ICE = [
   { urls: 'stun:stun.relay.metered.ca:80' },
   { urls: 'turn:global.relay.metered.ca:80', username: '403d8a7db25a819098d7d8c9', credential: 'go7c76Oi2qYbDGN1' },
@@ -124,6 +124,7 @@ var ICE = [
   { urls: 'turn:global.relay.metered.ca:443', username: '403d8a7db25a819098d7d8c9', credential: 'go7c76Oi2qYbDGN1' },
   { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: '403d8a7db25a819098d7d8c9', credential: 'go7c76Oi2qYbDGN1' }
 ];
+var PEER_CFG = { config: { iceServers: ICE } };
 
 var EMOJIS = ['👍','👏','😂','😮','❤️','🎉','🙏','🔥'];
 
@@ -131,17 +132,12 @@ var stream = null, screenStream = null, peer = null, call = null, conn = null;
 var myName = '', isHost = false, roomId = '';
 var pending = new Map();
 var micOn = true, camOn = true;
+var joinTimer = null;
 
 var params = new URLSearchParams(location.search);
 if(params.get('room')) $('code').value = params.get('room');
 
 function status(t){ $('status').textContent = t; }
-
-function escapeText(s){
-  var d = document.createElement('div');
-  d.textContent = String(s);
-  return d.innerHTML;
-}
 
 function roomOf(s){ return String(s).trim().toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
@@ -161,7 +157,7 @@ function showRoom(){
   enableDrag();
 }
 
-// ===== Hôte =====
+// ===== HÔTE =====
 async function createRoom(){
   myName = $('name').value.trim();
   if(!myName){ status('Entrez un pseudo.'); return; }
@@ -169,20 +165,34 @@ async function createRoom(){
   isHost = true;
   $('link').textContent = location.origin + location.pathname + '?room=' + roomId;
   $('inviteBox').style.display = 'flex';
-  status('Préparation...');
+  status('Préparation…');
   try { await getMedia(); } catch(e){ status('Caméra/micro refusés : ' + e.message); return; }
-  peer = new Peer('room-' + roomId, { config: { iceServers: ICE } });
-  peer.on('open', function(){ status('Réunion créée. En attente...'); showRoom(); });
-  peer.on('connection', function(c){
-    c.on('data', function(d){ if(d.t === 'join') showJoinRequest(c, d.name); });
+
+  peer = new Peer('room-' + roomId, PEER_CFG);
+  peer.on('open', function(){
+    status('Réunion ouverte. Partagez le lien, en attente de quelqu\'un…');
+    showRoom();
   });
+  // Quelqu'un se connecte à la réunion : on attend sa demande
+  peer.on('connection', function(c){
+    c.on('data', function(d){
+      if(d.t === 'join') showJoinRequest(c, d.name);
+    });
+    c.on('close', function(){
+      // si la demande est encore en attente, on la retire
+      pending.forEach(function(v, k){
+        if(v.conn === c){ pending.delete(k); var el = $(k); if(el) el.remove(); }
+      });
+    });
+  });
+  // Appel entrant : on répond avec notre flux
   peer.on('call', function(c){ c.answer(stream); setCall(c); });
-  peer.on('error', function(e){ status('Erreur : ' + e.type); });
+  peer.on('error', function(e){ status('Erreur hôte : ' + e.type); });
 }
 
 function copyLink(){
   navigator.clipboard.writeText($('link').textContent);
-  status('Lien copié.');
+  status('Lien copié ✔');
 }
 
 function showJoinRequest(c, name){
@@ -199,16 +209,20 @@ function showJoinRequest(c, name){
   acts.className = 'acts';
   var ok = document.createElement('button');
   ok.className = 'ok';
-  ok.textContent = 'Accepter';
+  ok.textContent = '✅ Accepter';
   ok.onclick = function(){ respond(id, true); };
   var no = document.createElement('button');
   no.className = 'danger';
-  no.textContent = 'Refuser';
+  no.textContent = '❌ Refuser';
   no.onclick = function(){ respond(id, false); };
   acts.appendChild(ok);
   acts.appendChild(no);
   t.appendChild(acts);
   $('toasts').appendChild(t);
+  // notification sonore / navigateur si autorisé
+  if(document.hidden && 'Notification' in window && Notification.permission === 'granted'){
+    new Notification('Appel léger', { body: name + ' veut rejoindre' });
+  }
 }
 
 function respond(id, accept){
@@ -218,10 +232,11 @@ function respond(id, accept){
   var el = $(id);
   if(el) el.remove();
   if(accept){
-    p.conn.send({ t: 'accepted' });
     conn = p.conn;
     conn.on('data', handleData);
-    var c = peer.call(p.conn.peer, stream);
+    p.conn.send({ t: 'accepted' });
+    // Seulement maintenant on appelle l'invité
+    var c = peer.call('room-' + roomId + '-guest-' + p.conn.peer, stream);
     setCall(c);
   } else {
     p.conn.send({ t: 'refused' });
@@ -229,44 +244,70 @@ function respond(id, accept){
   }
 }
 
-// ===== Invité =====
+// ===== INVITÉ =====
 async function requestJoin(){
   myName = $('name').value.trim();
   roomId = roomOf($('code').value);
   if(!myName){ status('Entrez un pseudo.'); return; }
   if(roomId.length < 4){ status('Code invalide.'); return; }
-  status('Connexion...');
+  status('Connexion…');
   try { await getMedia(); } catch(e){ status('Caméra/micro refusés : ' + e.message); return; }
-  peer = new Peer({ config: { iceServers: ICE } });
-  peer.on('open', function(){
-    conn = peer.connect('room-' + roomId, { reliable: true });
-    conn.on('open', function(){
-      status('Demande envoyée, en attente de l\'hôte...');
-      conn.send({ t: 'join', name: myName });
-    });
-    conn.on('data', handleData);
-    conn.on('close', function(){ status('L\'hôte a fermé la réunion.'); });
-  });
+
+  peer = new Peer(PEER_CFG);
+  peer.on('open', function(){ tryConnect(); });
+  // L'hôte nous appelle après acceptation
   peer.on('call', function(c){ c.answer(stream); setCall(c); });
   peer.on('error', function(e){ status('Erreur : ' + e.type); });
 }
 
+function tryConnect(){
+  if(conn && conn.open) return;
+  status('Connexion à la réunion…');
+  conn = peer.connect('room-' + roomId, { reliable: true });
+  conn.on('open', function(){
+    status('Demande envoyée, en attente de l\'hôte…');
+    conn.send({ t: 'join', name: myName });
+  });
+  conn.on('data', handleData);
+  conn.on('close', function(){
+    if(!call) status('Réunion introuvable ou fermée.');
+  });
+  conn.on('error', function(){ });
+  // si l'hôte n'est pas encore là, on réessaie
+  clearTimeout(joinTimer);
+  joinTimer = setTimeout(function(){
+    if(!call && (!conn || !conn.open)){
+      try { conn.close(); } catch(e){}
+      status('Hôte pas encore là, nouvel essai…');
+      setTimeout(tryConnect, 2500);
+    }
+  }, 6000);
+}
+
 function handleData(d){
-  if(d.t === 'accepted'){ status('Acceptée, connexion...'); showRoom(); }
-  else if(d.t === 'refused'){ alert('L\'hôte a refusé votre demande.'); location.href = location.pathname; }
+  if(d.t === 'accepted'){
+    status('Acceptée, connexion vidéo…');
+    showRoom();
+  }
+  else if(d.t === 'refused'){
+    alert('L\'hôte a refusé votre demande.');
+    location.href = location.pathname;
+  }
   else if(d.t === 'chat'){ addMsg(d.name, d.v, false); }
   else if(d.t === 'emoji'){ showFloat(d.v); }
 }
 
-// ===== Appel vidéo =====
+// ===== APPEL VIDÉO =====
 function setCall(c){
   call = c;
   c.on('stream', function(s){
     $('remote').srcObject = s;
     $('remote').play().catch(function(){});
-    status('Connecté');
+    $('waiting').style.display = 'none';
+    status('Connecté ✔');
   });
-  c.on('close', function(){ status('Appel terminé.'); });
+  c.on('close', function(){ status('Appel terminé.'); $('waiting').style.display = 'flex'; });
+  c.on('error', function(e){ status('Erreur appel : ' + e.type); });
   setTimeout(function(){
     try {
       c.peerConnection.getSenders().forEach(function(snd){
@@ -284,18 +325,18 @@ function setCall(c){
 
 function send(obj){ if(conn && conn.open) conn.send(obj); }
 
-// ===== Commandes =====
+// ===== COMMANDES =====
 function toggleMic(){
   micOn = !micOn;
   if(stream) stream.getAudioTracks().forEach(function(t){ t.enabled = micOn; });
-  $('bMic').textContent = micOn ? 'M' : 'X';
+  $('bMic').textContent = micOn ? '🎤' : '🔇';
 }
 
 function toggleCam(){
   camOn = !camOn;
   if(stream) stream.getVideoTracks().forEach(function(t){ t.enabled = camOn; });
   $('self').classList.toggle('off', !camOn);
-  $('bCam').textContent = camOn ? 'C' : 'X';
+  $('bCam').textContent = camOn ? '📷' : '🚫';
 }
 
 async function toggleScreen(){
@@ -382,7 +423,6 @@ function toggleFull(){
   else document.exitFullscreen();
 }
 
-// Caméra locale déplaçable (souris + tactile)
 function enableDrag(){
   var self = $('self'), stage = $('stage');
   var dragging = false, offX = 0, offY = 0;
@@ -410,6 +450,7 @@ function enableDrag(){
 
 function hangup(){
   if(call) call.close();
+  if(conn) conn.close();
   if(peer) peer.destroy();
   if(stream) stream.getTracks().forEach(function(t){ t.stop(); });
   if(screenStream) screenStream.getTracks().forEach(function(t){ t.stop(); });
