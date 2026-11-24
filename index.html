@@ -103,7 +103,7 @@
       <button id="btnCam" class="ctrl" title="Caméra (V)" onclick="toggleCam()">
         <span class="ico">📷</span><span class="lbl">Caméra</span>
       </button>
-      <button class="ctrl" title="Partager l'écran" onclick="toggleScreen()">
+      <button id="btnScreen" class="ctrl" title="Partager l'écran" onclick="toggleScreen()">
         <span class="ico">🖥️</span><span class="lbl">Écran</span>
       </button>
       <button class="ctrl" title="Emoji" onclick="toggleEmoji()">
@@ -112,7 +112,7 @@
       <button class="ctrl" title="Chat" onclick="toggleChat()">
         <span class="ico">💬</span><span class="lbl">Chat</span>
       </button>
-      <button class="ctrl" title="Plein écran" onclick="toggleFull()">
+      <button id="btnFull" class="ctrl" title="Plein écran" onclick="toggleFull()">
         <span class="ico">⛶</span><span class="lbl">Plein écran</span>
       </button>
       <button class="ctrl" title="Paramètres" onclick="toggleMenu()">
@@ -124,8 +124,9 @@
 
       <div id="emojiPanel"></div>
       <div id="menu">
-        <button onclick="switchDevice('audioinput')">🎙️ Changer le micro</button>
-        <button onclick="switchDevice('videoinput')">📷 Changer la caméra</button>
+        <button id="btnFlip" class="hidden" onclick="flipCamera()">🔄 Caméra avant / arrière</button>
+        <button id="btnPickMic" onclick="switchDevice('audioinput')">🎙️ Changer le micro</button>
+        <button id="btnPickCam" onclick="switchDevice('videoinput')">📷 Changer la caméra</button>
         <button onclick="toggleDataSaver()">📶 <span id="dsLabel">Mode basse connexion : ON</span></button>
       </div>
     </div>
