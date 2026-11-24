@@ -147,6 +147,24 @@ async function enterCall() {
   try {
     localStream = await navigator.mediaDevices.getUserMedia(getConstraintsForQuality(quality));
     $('local').srcObject = localStream;
+    $('selfAvatar').style.display = 'none';
+    keepAwake();
+
+    // Détecter une caméra qui ne renvoie aucune image (déjà utilisée ailleurs, masquée…)
+    const camTrack = localStream.getVideoTracks()[0];
+    if (camTrack) {
+      console.log('Caméra :', camTrack.label, camTrack.getSettings());
+      const warn = () => {
+        $('selfLabel').textContent = myName + ' — caméra sans image (déjà utilisée ?)';
+        $('selfAvatar').style.display = 'flex';
+      };
+      camTrack.onmute = warn;
+      camTrack.onunmute = () => {
+        $('selfLabel').textContent = myName;
+        if (isCamOn) $('selfAvatar').style.display = 'none';
+      };
+      if (camTrack.muted) warn();
+    }
 
     if (quality === 'audio') {
       $('local').style.display = 'none';
@@ -220,6 +238,7 @@ function setupData(conn) {
   dataConn = conn;
   conn.on('open', () => {
     conn.send({ type: 'hello', value: myName });
+    sendCamState();
   });
   conn.on('data', handleData);
   conn.on('close', () => { dataConn = null; });
@@ -245,8 +264,7 @@ function attachRemote(call) {
   call.on('stream', (remoteStream) => {
     const v = $('remote');
     v.srcObject = remoteStream;
-    v.style.display = 'block';
-    $('remoteAvatar').style.display = 'none';
+    applyRemoteCam();
     $('remoteLabel').textContent = remoteName;
     // Forcer la lecture (certains navigateurs bloquent l'autoplay avec son)
     const p = v.play();
@@ -285,6 +303,17 @@ function toggleCam() {
   $('btnCam').classList.toggle('off', !isCamOn);
   $('local').style.display = isCamOn ? 'block' : 'none';
   $('selfAvatar').style.display = isCamOn ? 'none' : 'flex';
+  sendCamState();
+}
+
+// Prévient l'autre personne que la caméra est allumée/coupée
+let remoteCamOn = true;
+function sendCamState() {
+  if (dataConn && dataConn.open) dataConn.send({ type: 'cam', value: isCamOn });
+}
+function applyRemoteCam() {
+  $('remote').style.display = remoteCamOn ? 'block' : 'none';
+  $('remoteAvatar').style.display = remoteCamOn ? 'none' : 'flex';
 }
 
 // ---- Changement de qualité en direct ----
@@ -539,6 +568,10 @@ function handleData(data) {
     $('remoteLabel').textContent = remoteName;
     $('remoteAvatar').textContent = remoteName[0] || '?';
   }
+  if (data.type === 'cam') {
+    remoteCamOn = !!data.value;
+    applyRemoteCam();
+  }
   if (data.type === 'chat') addChatMsg(remoteName, data.value, false);
   if (data.type === 'emoji') showFloatingEmoji(data.value);
 }
@@ -599,6 +632,59 @@ async function switchDevice(kind) {
   }
 }
 
+// ---- Caméra avant / arrière (mobile) ----
+let facing = 'user';
+async function flipCamera() {
+  $('menu').classList.remove('show');
+  if (!localStream || !localStream.getVideoTracks()[0]) {
+    return alert('Active d\'abord la caméra (mode audio uniquement).');
+  }
+  const next = facing === 'user' ? 'environment' : 'user';
+  const p = QUALITY_PRESETS[quality] || QUALITY_PRESETS.low;
+  const old = localStream.getVideoTracks()[0];
+  try {
+    old.stop(); // un mobile ne peut souvent pas ouvrir deux caméras à la fois
+    const s = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: next },
+        width: { ideal: p.width || 160 },
+        height: { ideal: p.height || 120 },
+        frameRate: { ideal: p.fps || 10, max: p.fps || 10 }
+      }
+    });
+    const t = s.getVideoTracks()[0];
+    t.enabled = isCamOn;
+    if (currentCall) {
+      const sender = currentCall.peerConnection.getSenders()
+        .find(x => x.track && x.track.kind === 'video');
+      if (sender) await sender.replaceTrack(t);
+    }
+    localStream.removeTrack(old);
+    localStream.addTrack(t);
+    $('local').srcObject = localStream;
+    facing = next;
+  } catch (e) {
+    console.error(e);
+    await replaceVideoTrack(quality);   // on récupère la caméra précédente
+    alert('Impossible de changer de caméra.');
+  }
+}
+
+// ---- Garder l'écran allumé pendant l'appel (mobile) ----
+let wakeLock = null;
+async function keepAwake() {
+  try {
+    if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+  } catch (e) {}
+}
+function releaseAwake() {
+  try { if (wakeLock) wakeLock.release(); } catch (e) {}
+  wakeLock = null;
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && peer) keepAwake();
+});
+
 // ---- Quitter ----
 function hangup() {
   if (currentCall) currentCall.close();
@@ -607,6 +693,7 @@ function hangup() {
   dataConn = null;
   isHost = false;
   remoteName = 'Correspondant';
+  remoteCamOn = true;
   $('remoteLabel').textContent = 'En attente…';
   $('remoteAvatar').textContent = '?';
   $('remoteAvatar').style.display = 'flex';
@@ -631,8 +718,7 @@ function hangup() {
   $('btnCam').classList.remove('off');
   $('local').style.display = 'block';
 
-  // Redémarrer l'aperçu
-  initPreview();
+  releaseAwake();
 }
 
 // ============================================================
@@ -644,5 +730,20 @@ window.addEventListener('DOMContentLoaded', () => {
     const saved = localStorage.getItem('pliPseudo');
     if (saved && !$('name').value) $('name').value = saved;
   } catch (e) {}
-  initPreview();
+
+  // Adapter l'interface à l'appareil
+  const isTouch = window.matchMedia('(pointer: coarse)').matches;
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)) {
+    $('btnScreen').style.display = 'none';       // pas de partage d'écran sur mobile
+  }
+  if (!document.documentElement.requestFullscreen) {
+    $('btnFull').style.display = 'none';         // iPhone / Safari
+  }
+  if (isTouch) {
+    $('btnFlip').classList.remove('hidden');     // caméra avant/arrière
+    $('btnPickCam').style.display = 'none';      // sélecteur par prompt() peu adapté au tactile
+    $('btnPickMic').style.display = 'none';
+  }
+  // L'aperçu caméra à l'accueil n'est plus lancé : il allumait la caméra
+  // (et demandait l'autorisation) avant même de rejoindre un appel.
 });
