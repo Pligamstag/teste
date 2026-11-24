@@ -7,30 +7,69 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Écran de connexion -->
-  <section id="login" class="screen active">
-    <h1>Pli Call</h1>
-    <p class="subtitle">by Plipli Corp</p>
-    <input id="pseudo" type="text" placeholder="Ton pseudo" maxlength="20">
-    <button id="joinBtn">Rejoindre</button>
-  </section>
 
-  <!-- Écran d'appel -->
-  <section id="call" class="screen">
-    <header>
-      <span>Pli Call</span>
-      <button id="leaveBtn" class="danger">Quitter</button>
-    </header>
-    <main id="participants"></main>
-    <aside id="chat">
-      <div id="messages"></div>
-      <form id="chatForm">
-        <input id="chatInput" type="text" placeholder="Écrire un message...">
-        <button type="submit">Envoyer</button>
-      </form>
-    </aside>
-  </section>
+  <!-- ACCUEIL -->
+  <div id="join">
+    <div class="card">
+      <h1 style="text-align:center;margin:0">Pli Call</h1>
+      <input id="name" placeholder="Votre pseudo">
+      <button class="primary" onclick="createRoom()">Créer une réunion</button>
+      <div id="inviteBox" class="hidden">
+        <div class="muted">Code de la réunion :</div>
+        <div id="code_out"></div>
+        <button onclick="copyCode()">Copier le code</button>
+        <button class="primary" onclick="enterCall()">Entrer dans la réunion</button>
+      </div>
+      <hr style="border:0;border-top:1px solid var(--line);width:100%">
+      <input id="code" placeholder="Code de la réunion">
+      <button onclick="joinRoom()">Rejoindre</button>
+      <div id="status"></div>
+    </div>
+  </div>
 
+  <!-- APPEL -->
+  <div id="call">
+    <div id="stage">
+      <div class="tile" id="remoteTile">
+        <video id="remote" autoplay playsinline></video>
+        <div class="avatar" id="remoteAvatar"></div>
+        <div class="label" id="remoteLabel">En attente…</div>
+      </div>
+      <div class="tile" id="selfTile">
+        <video id="local" autoplay muted playsinline></video>
+        <div class="avatar" id="selfAvatar"></div>
+        <div class="label" id="selfLabel"></div>
+      </div>
+    </div>
+    <div id="bar">
+      <button id="btnMic" title="Micro" onclick="toggleMic()">🎤</button>
+      <button id="btnCam" title="Caméra" onclick="toggleCam()">📷</button>
+      <button title="Partager l'écran" onclick="toggleScreen()">🖥️</button>
+      <button title="Emojis" onclick="toggleEmoji()">😀</button>
+      <button title="Chat" onclick="toggleChat()">💬</button>
+      <button title="Plein écran" onclick="toggleFull()">⛶</button>
+      <button title="Paramètres" onclick="toggleMenu()">⚙️</button>
+      <button class="wide danger" onclick="hangup()">Quitter</button>
+      <div id="emojiPanel"></div>
+      <div id="menu">
+        <button onclick="switchDevice('audioinput')">Changer le micro</button>
+        <button onclick="switchDevice('videoinput')">Changer la caméra</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="chatPanel">
+    <div style="padding:10px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+      <b>Chat</b><button onclick="toggleChat()">✕</button>
+    </div>
+    <div id="chatLog"></div>
+    <form id="chatForm" onsubmit="sendChat(event)">
+      <input id="chatInput" placeholder="Écrire un message">
+      <button class="primary">OK</button>
+    </form>
+  </div>
+
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
