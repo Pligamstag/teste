@@ -1,4 +1,35 @@
-// ---------- Variables globales ----------
+/* =========================================================
+   Pli Call — script.js
+   Optimisé basse connexion (bitrate limité, audio prioritaire,
+   désactivation auto vidéo, résolution adaptative)
+   ========================================================= */
+
+// ---------- Configuration "basse connexion" ----------
+const CONFIG = {
+  // Contraintes vidéo modestes => moins de bande passante
+  videoConstraints: {
+    width:  { ideal: 320, max: 640 },
+    height: { ideal: 240, max: 480 },
+    frameRate: { ideal: 12, max: 20 }
+  },
+  audioConstraints: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
+  },
+  // Bitrates max (kbps) pour limiter l'upload
+  maxVideoBitrate: 200_000,   // 200 kbps
+  maxAudioBitrate: 32_000,    // 32 kbps
+  // ICE servers : STUN only (pas de TURN = plus léger, mais moins universel)
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' }
+  ],
+  // Seuil de détection "mauvaise connexion"
+  lowNetworkThreshold: 3      // ratio de paquets perdus estimé
+};
+
+// ---------- État global ----------
 let peer = null;
 let currentCall = null;
 let localStream = null;
@@ -7,102 +38,263 @@ let roomCode = null;
 let isMicOn = true;
 let isCamOn = true;
 let isScreenSharing = false;
+let dataSaver = true;         // mode basse connexion (vidéo off par défaut ?)
+let callStart = 0;
+let clockInterval = null;
+let netCheckInterval = null;
 
 const $ = (id) => document.getElementById(id);
 
-// ---------- Création de réunion ----------
-function createRoom() {
-  const name = $('name').value.trim();
-  if (!name) return alert('Renseigne un pseudo.');
-  roomCode = generateCode();
-  $('code_out').textContent = roomCode;
-  $('inviteBox').classList.remove('hidden');
-}
-
+// ---------- Utilitaires ----------
 function generateCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-function copyCode() {
-  navigator.clipboard.writeText(roomCode)
-    .then(() => alert('Code copié !'))
-    .catch(() => alert('Copie impossible'));
+function setStatus(msg, kind = '') {
+  const el = $('status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = kind === 'error' ? '#ea4335'
+                 : kind === 'ok'    ? '#34a853'
+                 : '#9aa0a6';
 }
 
-// ---------- Rejoindre une réunion ----------
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  })[c]);
+}
+
+function showToast(msg) {
+  // Petit toast discret
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = `
+    position:fixed;bottom:110px;left:50%;transform:translateX(-50%);
+    background:#3c4043;color:#fff;padding:10px 16px;border-radius:999px;
+    font-size:13px;z-index:9999;opacity:0;transition:opacity .25s;
+  `;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.style.opacity = '1');
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 1800);
+}
+
+// ---------- Accueil ----------
+function createRoom() {
+  const name = $('name').value.trim();
+  if (!name) return setStatus('Renseigne ton pseudo.', 'error');
+  roomCode = generateCode();
+  $('code_out').textContent = roomCode;
+  $('inviteBox').classList.remove('hidden');
+  setStatus('Réunion créée. Partage le code.', 'ok');
+}
+
+function copyCode() {
+  if (!roomCode) return;
+  navigator.clipboard.writeText(roomCode)
+    .then(() => {
+      const hint = $('copyHint');
+      hint.classList.remove('hidden');
+      setTimeout(() => hint.classList.add('hidden'), 1500);
+    })
+    .catch(() => setStatus('Copie impossible.', 'error'));
+}
+
 function joinRoom() {
   const code = $('code').value.trim().toUpperCase();
-  if (!code) return alert('Renseigne un code.');
+  if (!code) return setStatus('Renseigne un code de réunion.', 'error');
   roomCode = code;
   enterCall();
 }
 
-// ---------- Entrer dans l'appel ----------
+// ---------- Entrée en réunion ----------
 async function enterCall() {
   const name = $('name').value.trim() || 'Anonyme';
-  $('selfLabel').textContent = name;
+
   $('join').style.display = 'none';
   $('call').classList.add('active');
+  $('roomLabel').textContent = 'Réunion ' + roomCode;
+  $('selfLabel').textContent = name;
+  $('selfAvatar').textContent = name.charAt(0).toUpperCase();
+  $('remoteAvatar').textContent = '?';
 
+  // 1) Obtenir les médias (audio d'abord pour prioriser la voix)
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: true
+      audio: CONFIG.audioConstraints,
+      video: CONFIG.videoConstraints
     });
     $('local').srcObject = localStream;
   } catch (err) {
-    alert('Impossible d\'accéder à la caméra/micro : ' + err.message);
-    return;
+    console.error(err);
+    // Fallback : audio seul (utile en très basse connexion)
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        audio: CONFIG.audioConstraints, video: false
+      });
+      localStream.getVideoTracks().length = 0;
+      $('local').style.display = 'none';
+      $('selfAvatar').style.display = 'flex';
+      isCamOn = false;
+      $('btnCam').classList.add('off');
+      showToast('Caméra indisponible — audio seul activé');
+    } catch (err2) {
+      alert('Impossible d\'accéder au micro/caméra : ' + err2.message);
+      hangup();
+      return;
+    }
   }
 
+  // 2) Créer le Peer (STUN seulement, léger)
   peer = new Peer('pli-' + roomCode, {
-    config: {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ]
-    }
+    config: { iceServers: CONFIG.iceServers },
+    debug: 1
   });
 
   peer.on('open', (id) => {
     console.log('Peer connecté :', id);
-    $('status').textContent = 'Connecté au serveur.';
+    updateNetBadge('ok', 'En ligne');
+    startClock();
+    startNetCheck();
   });
 
   peer.on('call', (call) => {
+    // On répond avec notre flux (audio d'abord)
     call.answer(localStream);
     currentCall = call;
-    attachRemote(call);
+    attachCall(call);
   });
 
   peer.on('error', (err) => {
-    console.error(err);
+    console.error('Peer error:', err);
     if (err.type === 'unavailable-id') {
-      alert('Ce code de réunion est déjà utilisé. Essaie d\'en rejoindre un autre.');
+      setStatus('Ce code est déjà utilisé. Réessaie.', 'error');
+      showToast('Code déjà pris');
       hangup();
+    } else if (err.type === 'network') {
+      updateNetBadge('bad', 'Réseau');
     }
   });
+
+  peer.on('disconnected', () => {
+    updateNetBadge('warn', 'Reconnexion…');
+    try { peer.reconnect(); } catch (_) {}
+  });
 }
 
-function attachRemote(call) {
+// ---------- Gestion de l'appel ----------
+function attachCall(call) {
+  // Limiter le bitrate dès que possible
+  applyBitrateLimits(call);
+
   call.on('stream', (remoteStream) => {
-    $('remote').srcObject = remoteStream;
-    $('remote').style.display = 'block';
+    const remote = $('remote');
+    remote.srcObject = remoteStream;
+    remote.style.display = 'block';
     $('remoteAvatar').style.display = 'none';
+    $('remoteLabel').textContent = 'Correspondant';
+
+    // Si la piste vidéo arrive plus tard, on ne bloque pas l'audio
+    remoteStream.getVideoTracks().forEach(track => {
+      track.onmute = () => { $('remoteAvatar').style.display = 'flex'; };
+      track.onunmute = () => { $('remoteAvatar').style.display = 'none'; };
+    });
   });
+
+  call.on('data', (data) => {
+    if (data.type === 'chat')  addChatMsg(data.author || 'Correspondant', data.value);
+    if (data.type === 'emoji') showFloatingEmoji(data.value);
+  });
+
   call.on('close', () => {
     $('remote').srcObject = null;
+    $('remote').style.display = 'none';
     $('remoteAvatar').style.display = 'flex';
     $('remoteLabel').textContent = 'Appel terminé';
+    updateNetBadge('bad', 'Terminé');
+  });
+
+  call.on('error', (err) => {
+    console.error(err);
+    showToast('Erreur d\'appel');
   });
 }
 
-// ---------- Contrôles ----------
+// ---------- Limitation de bande passante ----------
+async function applyBitrateLimits(call) {
+  const pc = call.peerConnection;
+  if (!pc) return;
+
+  // SDP tweak : limiter le bitrate vidéo
+  try {
+    const senders = pc.getSenders();
+    for (const sender of senders) {
+      const params = sender.getParameters();
+      if (!params.encodings) params.encodings = [{}];
+      if (sender.track && sender.track.kind === 'video') {
+        params.encodings[0].maxBitrate = CONFIG.maxVideoBitrate;
+        params.encodings[0].scaleResolutionDownBy = 1.5; // réduit la résolution
+      }
+      if (sender.track && sender.track.kind === 'audio') {
+        params.encodings[0].maxBitrate = CONFIG.maxAudioBitrate;
+      }
+      await sender.setParameters(params);
+    }
+  } catch (e) {
+    console.warn('Bitrate limits non appliquées:', e);
+  }
+
+  // Surveillance qualité
+  if (typeof call.peerConnection.getStats === 'function') {
+    startQualityMonitor(pc);
+  }
+}
+
+function startQualityMonitor(pc) {
+  setInterval(async () => {
+    try {
+      const stats = await pc.getStats();
+      let videoLoss = 0, audioLoss = 0;
+      stats.forEach(report => {
+        if (report.type === 'inbound-rtp') {
+          if (report.kind === 'video') videoLoss = report.packetsLost || 0;
+          if (report.kind === 'audio') audioLoss = report.packetsLost || 0;
+        }
+      });
+      const totalLoss = videoLoss + audioLoss;
+
+      const tag = $('remoteQuality');
+      if (totalLoss > 100) {
+        tag.textContent = 'Réseau faible';
+        tag.className = 'quality-tag show bad';
+        updateNetBadge('bad', 'Faible');
+      } else if (totalLoss > 20) {
+        tag.textContent = 'Réseau moyen';
+        tag.className = 'quality-tag show low';
+        updateNetBadge('warn', 'Moyen');
+      } else {
+        tag.className = 'quality-tag';
+        updateNetBadge('ok', 'Bon');
+      }
+    } catch (_) {}
+  }, 4000);
+}
+
+function startNetCheck() {
+  netCheckInterval = setInterval(() => {
+    if (!peer || peer.destroyed) return;
+    if (peer.disconnected) updateNetBadge('warn', 'Déconnecté');
+  }, 3000);
+}
+
+// ---------- Contrôles utilisateur ----------
 function toggleMic() {
   if (!localStream) return;
   isMicOn = !isMicOn;
   localStream.getAudioTracks().forEach(t => (t.enabled = isMicOn));
   $('btnMic').classList.toggle('off', !isMicOn);
+  $('btnMic').querySelector('.ico').textContent = isMicOn ? '🎤' : '🔇';
+  showToast(isMicOn ? 'Micro activé' : 'Micro coupé');
 }
 
 function toggleCam() {
@@ -110,23 +302,27 @@ function toggleCam() {
   isCamOn = !isCamOn;
   localStream.getVideoTracks().forEach(t => (t.enabled = isCamOn));
   $('btnCam').classList.toggle('off', !isCamOn);
+  $('local').style.display = isCamOn ? 'block' : 'none';
+  $('selfAvatar').style.display = isCamOn ? 'none' : 'flex';
+  $('btnCam').querySelector('.ico').textContent = isCamOn ? '📷' : '📵';
+  showToast(isCamOn ? 'Caméra activée' : 'Caméra coupée');
 }
 
 async function toggleScreen() {
-  if (!currentCall) return;
+  if (!currentCall) return showToast('Aucun correspondant');
 
   if (!isScreenSharing) {
     try {
-      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      screenStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 10 }, audio: false
+      });
       const videoTrack = screenStream.getVideoTracks()[0];
       const sender = currentCall.peerConnection
-        .getSenders()
-        .find(s => s.track && s.track.kind === 'video');
+        .getSenders().find(s => s.track && s.track.kind === 'video');
       if (sender) await sender.replaceTrack(videoTrack);
 
       $('local').srcObject = screenStream;
       isScreenSharing = true;
-
       videoTrack.onended = () => stopScreenShare();
     } catch (err) {
       console.warn('Partage annulé :', err);
@@ -139,182 +335,9 @@ async function toggleScreen() {
 async function stopScreenShare() {
   if (!screenStream) return;
   const videoTrack = localStream.getVideoTracks()[0];
-  const sender = currentCall.peerConnection
-    .getSenders()
-    .find(s => s.track && s.track.kind === 'video');
+  const sender = currentCall?.peerConnection
+    .getSenders().find(s => s.track && s.track.kind === 'video');
   if (sender && videoTrack) await sender.replaceTrack(videoTrack);
 
   screenStream.getTracks().forEach(t => t.stop());
-  screenStream = null;
-  isScreenSharing = false;
-  $('local').srcObject = localStream;
-}
-
-function toggleEmoji() {
-  $('emojiPanel').classList.toggle('show');
-  $('menu').classList.remove('show');
-  const panel = $('emojiPanel');
-  if (!panel.dataset.filled) {
-    ['👍','👎','😂','❤️','🎉','😮','😢','👏'].forEach(e => {
-      const btn = document.createElement('button');
-      btn.textContent = e;
-      btn.onclick = () => sendEmoji(e);
-      panel.appendChild(btn);
-    });
-    panel.dataset.filled = '1';
-  }
-}
-
-function sendEmoji(emoji) {
-  if (currentCall && currentCall.open) {
-    currentCall.send({ type: 'emoji', value: emoji });
-    showFloatingEmoji(emoji);
-  }
-  $('emojiPanel').classList.remove('show');
-}
-
-function showFloatingEmoji(emoji) {
-  const el = document.createElement('div');
-  el.textContent = emoji;
-  el.style.cssText = `
-    position:fixed;bottom:100px;left:50%;transform:translateX(-50%);
-    font-size:64px;pointer-events:none;z-index:999;
-    animation:floatUp 2s ease-out forwards;
-  `;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2000);
-}
-
-// Animation CSS injectée dynamiquement
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes floatUp {
-    0%   { opacity: 1; transform: translate(-50%, 0) scale(1); }
-    100% { opacity: 0; transform: translate(-50%, -200px) scale(1.6); }
-  }
-`;
-document.head.appendChild(style);
-
-function toggleChat() {
-  $('chatPanel').classList.toggle('open');
-}
-
-function sendChat(ev) {
-  ev.preventDefault();
-  const input = $('chatInput');
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = '';
-  if (currentCall && currentCall.open) {
-    currentCall.send({ type: 'chat', value: text });
-  }
-  addChatMsg('Moi', text);
-}
-
-function addChatMsg(author, text) {
-  const div = document.createElement('div');
-  div.className = 'msg';
-  div.innerHTML = `<b>${escapeHtml(author)}</b> : ${escapeHtml(text)}`;
-  $('chatLog').appendChild(div);
-  $('chatLog').scrollTop = $('chatLog').scrollHeight;
-}
-
-function escapeHtml(s) {
-  return s.replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  })[c]);
-}
-
-function toggleFull() {
-  if (!document.fullscreenElement) {
-    document.documentElement.requestFullscreen().catch(() => {});
-  } else {
-    document.exitFullscreen();
-  }
-}
-
-function toggleMenu() {
-  $('menu').classList.toggle('show');
-  $('emojiPanel').classList.remove('show');
-}
-
-async function switchDevice(kind) {
-  try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const list = devices.filter(d => d.kind === kind);
-    if (!list.length) return alert('Aucun périphérique trouvé.');
-    const choice = prompt(
-      'Choisis un périphérique (numéro) :\n' +
-      list.map((d, i) => `${i + 1}. ${d.label || 'Sans nom'}`).join('\n')
-    );
-    const idx = parseInt(choice, 10) - 1;
-    if (isNaN(idx) || !list[idx]) return;
-
-    const constraints = kind === 'audioinput'
-      ? { audio: { deviceId: { exact: list[idx].deviceId } } }
-      : { video: { deviceId: { exact: list[idx].deviceId } } };
-
-    const newStream = await navigator.mediaDevices.getUserMedia(constraints);
-    const newTrack = kind === 'audioinput'
-      ? newStream.getAudioTracks()[0]
-      : newStream.getVideoTracks()[0];
-
-    if (currentCall) {
-      const sender = currentCall.peerConnection
-        .getSenders()
-        .find(s => s.track && s.track.kind === newTrack.kind);
-      if (sender) await sender.replaceTrack(newTrack);
-    }
-
-    const oldTracks = (kind === 'audioinput'
-      ? localStream.getAudioTracks()
-      : localStream.getVideoTracks());
-    oldTracks.forEach(t => { t.stop(); localStream.removeTrack(t); });
-    localStream.addTrack(newTrack);
-
-    if (kind === 'videoinput') $('local').srcObject = localStream;
-  } catch (err) {
-    console.error(err);
-    alert('Impossible de changer de périphérique.');
-  }
-}
-
-function hangup() {
-  if (currentCall) currentCall.close();
-  if (peer) peer.destroy();
-  if (localStream) localStream.getTracks().forEach(t => t.stop());
-  if (screenStream) screenStream.getTracks().forEach(t => t.stop());
-
-  currentCall = null;
-  peer = null;
-  localStream = null;
-  screenStream = null;
-  isScreenSharing = false;
-  isMicOn = true;
-  isCamOn = true;
-
-  $('local').srcObject = null;
-  $('remote').srcObject = null;
-  $('call').classList.remove('active');
-  $('join').style.display = 'flex';
-  $('chatLog').innerHTML = '';
-  $('inviteBox').classList.add('hidden');
-  $('btnMic').classList.remove('off');
-  $('btnCam').classList.remove('off');
-}
-
-// ---------- Réception des messages data ----------
-function handleData(data) {
-  if (data.type === 'chat') addChatMsg('Correspondant', data.value);
-  if (data.type === 'emoji') showFloatingEmoji(data.value);
-}
-
-// Hook : attacher le handler data quand un appel arrive
-const _attachRemote = attachRemote;
-attachRemote = function(call) {
-  _attachRemote(call);
-  call.on('data', handleData);
-};
-
-// Idem pour l'appelant (si tu ajoutes un bouton "appeler")
-// -> il suffira d'ajouter : call.on('data', handleData);
+  screenStream =
