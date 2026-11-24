@@ -102,6 +102,11 @@ function copyCode() {
 }
 
 function joinRoom() {
+  const name = $('name').value.trim();
+  if (!name) {
+    $('name').focus();
+    return alert('Renseigne ton pseudo avant de rejoindre.');
+  }
   const code = $('code').value.trim().toUpperCase();
   if (!code) return alert('Renseigne un code.');
   roomCode = code;
@@ -113,7 +118,12 @@ function joinRoom() {
 // 3. ENTRÉE DANS L'APPEL
 // ============================================================
 async function enterCall() {
-  const name = $('name').value.trim() || 'Anonyme';
+  const name = $('name').value.trim();
+  if (!name) {
+    $('name').focus();
+    return alert('Renseigne un pseudo.');
+  }
+  try { localStorage.setItem('pliPseudo', name); } catch (e) {}
   myName = name;
   $('selfLabel').textContent = name;
   $('selfAvatar').textContent = name[0];
@@ -606,5 +616,10 @@ function hangup() {
 // DÉMARRAGE
 // ============================================================
 window.addEventListener('DOMContentLoaded', () => {
+  // Pré-remplir le pseudo mémorisé
+  try {
+    const saved = localStorage.getItem('pliPseudo');
+    if (saved && !$('name').value) $('name').value = saved;
+  } catch (e) {}
   initPreview();
 });
