@@ -4,6 +4,10 @@
 
 let peer = null;
 let currentCall = null;
+let dataConn = null;
+let isHost = false;
+let myName = 'Anonyme';
+let remoteName = 'Correspondant';
 let localStream = null;
 let screenStream = null;
 let roomCode = null;
@@ -81,9 +85,9 @@ function createRoom() {
   const name = $('name').value.trim();
   if (!name) return alert('Renseigne un pseudo.');
   roomCode = generateCode();
+  isHost = true;
   $('code_out').textContent = roomCode;
   $('inviteBox').classList.remove('hidden');
-  $('infoCode').textContent = roomCode;
 }
 
 function generateCode() {
@@ -101,7 +105,7 @@ function joinRoom() {
   const code = $('code').value.trim().toUpperCase();
   if (!code) return alert('Renseigne un code.');
   roomCode = code;
-  $('infoCode').textContent = code;
+  isHost = false;
   enterCall();
 }
 
@@ -110,8 +114,10 @@ function joinRoom() {
 // ============================================================
 async function enterCall() {
   const name = $('name').value.trim() || 'Anonyme';
+  myName = name;
   $('selfLabel').textContent = name;
   $('selfAvatar').textContent = name[0];
+  $('roomLabel').textContent = 'Code : ' + roomCode;
 
   // Récupérer qualité choisie à l'accueil
   const q = $('quality') ? $('quality').value : 'low';
@@ -142,27 +148,40 @@ async function enterCall() {
     return;
   }
 
-  // Créer le peer
-  peer = new Peer('pli-' + roomCode, {
+  // Créer le peer :
+  //  - l'hôte prend l'ID fixe "pli-CODE"
+  //  - l'invité prend un ID aléatoire et appelle l'hôte
+  const peerConfig = {
     config: {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' }
-      ],
-      // Réduire les candidats ICE pour économiser la bande passante
-      iceCandidatePoolSize: 0
+        { urls: 'stun:stun1.l.google.com:19302' },
+        // Relais TURN public (nécessaire derrière 4G / box stricte)
+        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+      ]
     }
-  });
+  };
+  const hostId = 'pli-' + roomCode;
+  peer = isHost ? new Peer(hostId, peerConfig) : new Peer(peerConfig);
 
   peer.on('open', (id) => {
     console.log('Peer connecté :', id);
-    $('status').textContent = 'Connecté au serveur.';
+    $('remoteLabel').textContent = isHost ? 'En attente d\'un participant…' : 'Connexion à la réunion…';
+    if (!isHost) connectToHost(hostId);
   });
 
+  // L'hôte reçoit l'appel et le canal de données
   peer.on('call', (call) => {
     call.answer(localStream);
     currentCall = call;
     attachRemote(call);
+  });
+  peer.on('connection', (conn) => setupData(conn));
+
+  peer.on('disconnected', () => {
+    try { peer.reconnect(); } catch (e) {}
   });
 
   peer.on('error', (err) => {
@@ -170,8 +189,30 @@ async function enterCall() {
     if (err.type === 'unavailable-id') {
       alert('Ce code de réunion est déjà utilisé.');
       hangup();
+    } else if (err.type === 'peer-unavailable') {
+      alert('Réunion introuvable. Vérifie le code, et que l\'hôte a bien cliqué sur « Rejoindre ».');
+      hangup();
+    } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
+      $('remoteLabel').textContent = 'Problème de connexion au serveur…';
     }
   });
+}
+
+function connectToHost(hostId) {
+  setupData(peer.connect(hostId, { reliable: true }));
+  const call = peer.call(hostId, localStream);
+  if (!call) return;
+  currentCall = call;
+  attachRemote(call);
+}
+
+function setupData(conn) {
+  dataConn = conn;
+  conn.on('open', () => {
+    conn.send({ type: 'hello', value: myName });
+  });
+  conn.on('data', handleData);
+  conn.on('close', () => { dataConn = null; });
 }
 
 function attachRemote(call) {
@@ -179,6 +220,7 @@ function attachRemote(call) {
     $('remote').srcObject = remoteStream;
     $('remote').style.display = 'block';
     $('remoteAvatar').style.display = 'none';
+    $('remoteLabel').textContent = remoteName;
   });
   call.on('close', () => {
     $('remote').srcObject = null;
@@ -186,7 +228,7 @@ function attachRemote(call) {
     $('remoteAvatar').style.display = 'flex';
     $('remoteLabel').textContent = 'Appel terminé';
   });
-  call.on('data', handleData);
+  call.on('error', (e) => console.error('Erreur appel', e));
 }
 
 // ============================================================
@@ -217,12 +259,6 @@ async function setQuality(q) {
   quality = q;
   updateNetBadge();
   $('menu').classList.remove('show');
-  $('infoQuality').textContent = 'Qualité : ' + labelQuality(q);
-
-  // Mettre à jour le menu (surligner l'actif)
-  document.querySelectorAll('#menu button[data-q]').forEach(b => {
-    b.classList.toggle('active-q', b.dataset.q === q);
-  });
 
   if (!currentCall || !localStream) return;
 
@@ -331,8 +367,16 @@ function updateNetBadge() {
     high: '✨ Haute qualité',
     audio: '🎧 Audio uniquement'
   };
-  badge.textContent = labels[quality] || '';
-  badge.className = 'net-badge' + (quality === 'high' ? ' warn' : '');
+  badge.innerHTML = '<span class="dot"></span> ' + (labels[quality] || '');
+  badge.className = 'net-badge ' + (quality === 'high' ? 'warn' : 'ok');
+}
+
+// ---- Mode basse connexion (bouton du menu Options) ----
+function toggleDataSaver() {
+  const lowOn = quality === 'low';
+  $('dsLabel').textContent = 'Mode basse connexion : ' + (lowOn ? 'OFF' : 'ON');
+  $('menu').classList.remove('show');
+  setQuality(lowOn ? 'medium' : 'low');
 }
 
 // ---- Partage d'écran ----
@@ -389,8 +433,8 @@ function toggleEmoji() {
 }
 
 function sendEmoji(emoji) {
-  if (currentCall && currentCall.open) {
-    currentCall.send({ type: 'emoji', value: emoji });
+  if (dataConn && dataConn.open) {
+    dataConn.send({ type: 'emoji', value: emoji });
   }
   showFloatingEmoji(emoji);
   $('emojiPanel').classList.remove('show');
@@ -436,8 +480,8 @@ function sendChat(ev) {
   const text = input.value.trim();
   if (!text) return;
   input.value = '';
-  if (currentCall && currentCall.open) {
-    currentCall.send({ type: 'chat', value: text });
+  if (dataConn && dataConn.open) {
+    dataConn.send({ type: 'chat', value: text });
   }
   addChatMsg('Moi', text, true);
 }
@@ -457,7 +501,12 @@ function escapeHtml(s) {
 }
 
 function handleData(data) {
-  if (data.type === 'chat') addChatMsg('Correspondant', data.value, false);
+  if (data.type === 'hello') {
+    remoteName = String(data.value || 'Correspondant');
+    $('remoteLabel').textContent = remoteName;
+    $('remoteAvatar').textContent = remoteName[0] || '?';
+  }
+  if (data.type === 'chat') addChatMsg(remoteName, data.value, false);
   if (data.type === 'emoji') showFloatingEmoji(data.value);
 }
 
@@ -520,7 +569,14 @@ async function switchDevice(kind) {
 // ---- Quitter ----
 function hangup() {
   if (currentCall) currentCall.close();
+  if (dataConn) dataConn.close();
   if (peer) peer.destroy();
+  dataConn = null;
+  isHost = false;
+  remoteName = 'Correspondant';
+  $('remoteLabel').textContent = 'En attente…';
+  $('remoteAvatar').textContent = '?';
+  $('remoteAvatar').style.display = 'flex';
   if (localStream) localStream.getTracks().forEach(t => t.stop());
   if (screenStream) screenStream.getTracks().forEach(t => t.stop());
 
