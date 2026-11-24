@@ -1,22 +1,238 @@
-*{box-sizing:border-box}
-:root{--bg:#1b1c20;--panel:#26282d;--line:#34373e;--text:#eceef2;--mute:#9aa0aa;--accent:#5b8cff;--danger:#e5484d}
-html,body{margin:0;height:100%}
-body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);overflow:hidden}
+:root {
+  --bg: #0f1115;
+  --bg2: #171a21;
+  --card: #1e222b;
+  --line: #2a2f3a;
+  --text: #e7ecf3;
+  --muted: #8b93a3;
+  --primary: #4f7cff;
+  --primary-hover: #3d68e6;
+  --danger: #e5484d;
+  --radius: 12px;
+}
 
-.screen{display:none;height:100%;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:12px}
-.screen.active{display:flex}
+* { box-sizing: border-box; }
 
-h1{margin:0}
-.subtitle{color:var(--mute);margin:0 0 20px}
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
 
-input{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:12px;border-radius:8px;width:100%;max-width:300px;font-size:16px}
-button{background:var(--accent);color:#fff;border:0;padding:12px 20px;border-radius:8px;font-size:16px;cursor:pointer}
-button.danger{background:var(--danger)}
+button {
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--bg2);
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  transition: background 0.15s, border-color 0.15s;
+}
+button:hover { background: var(--card); }
+button.primary { background: var(--primary); border-color: var(--primary); }
+button.primary:hover { background: var(--primary-hover); }
+button.danger { background: var(--danger); border-color: var(--danger); }
+button.wide { padding-inline: 20px; }
 
-#call{justify-content:stretch;align-items:stretch;padding:0}
-#call header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
-#participants{flex:1;display:flex;flex-wrap:wrap;gap:10px;padding:12px;overflow:auto}
-#chat{height:40%;display:flex;flex-direction:column;border-top:1px solid var(--line)}
-#messages{flex:1;overflow:auto;padding:10px}
-#chatForm{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}
-#chatForm input{flex:1;max-width:none}
+input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--bg2);
+  color: var(--text);
+  font-size: 14px;
+  margin: 6px 0;
+}
+input:focus { outline: none; border-color: var(--primary); }
+
+.hidden { display: none !important; }
+.muted { color: var(--muted); font-size: 13px; }
+
+/* ---------- Écran d'accueil ---------- */
+#join {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 20px;
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 24px;
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#inviteBox {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg2);
+  border-radius: var(--radius);
+}
+#code_out {
+  font-family: monospace;
+  font-size: 20px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: var(--primary);
+  word-break: break-all;
+}
+#status { color: var(--muted); font-size: 13px; text-align: center; }
+
+/* ---------- Écran d'appel ---------- */
+#call {
+  display: none;
+  flex-direction: column;
+  height: 100vh;
+}
+#call.active { display: flex; }
+
+#stage {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding: 10px;
+  min-height: 0;
+}
+.tile {
+  position: relative;
+  background: var(--bg2);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tile video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.tile .avatar {
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--primary);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: bold;
+  color: #fff;
+  text-transform: uppercase;
+}
+.tile .label {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  padding: 3px 8px;
+  background: rgba(0,0,0,0.55);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+/* Barre de contrôles */
+#bar {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  border-top: 1px solid var(--line);
+  background: var(--bg2);
+}
+#bar button {
+  min-width: 46px;
+  font-size: 18px;
+  padding: 8px 10px;
+}
+#bar button.off { background: var(--danger); border-color: var(--danger); }
+
+#emojiPanel, #menu {
+  position: absolute;
+  bottom: 70px;
+  right: 10px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 20;
+}
+#emojiPanel.show, #menu.show { display: flex; }
+#emojiPanel {
+  flex-direction: row;
+  flex-wrap: wrap;
+  max-width: 200px;
+}
+#emojiPanel button {
+  font-size: 22px;
+  padding: 4px 6px;
+  min-width: auto;
+}
+
+/* ---------- Chat ---------- */
+#chatPanel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 320px;
+  max-width: 90vw;
+  height: 100vh;
+  background: var(--card);
+  border-left: 1px solid var(--line);
+  display: none;
+  flex-direction: column;
+  z-index: 50;
+}
+#chatPanel.open { display: flex; }
+#chatLog {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+}
+#chatLog .msg {
+  background: var(--bg2);
+  padding: 6px 10px;
+  border-radius: 8px;
+  word-wrap: break-word;
+}
+#chatLog .msg b { color: var(--primary); }
+#chatForm {
+  display: flex;
+  gap: 6px;
+  padding: 10px;
+  border-top: 1px solid var(--line);
+}
+#chatForm input { margin: 0; }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 700px) {
+  #stage {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
+  #bar button { font-size: 16px; padding: 6px 8px; min-width: 40px; }
+}
