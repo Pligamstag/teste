@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#202124">
   <title>Pli Call</title>
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
 
@@ -49,11 +49,6 @@
       <button class="btn" onclick="joinRoom()">
         <span>🔗</span> Rejoindre une réunion
       </button>
-
-      <label class="check">
-        <input type="checkbox" id="strictNet">
-        <span>Réseau strict <span class="muted">(lycée, entreprise : passe par le relais sécurisé)</span></span>
-      </label>
 
       <div id="status" class="muted"></div>
 
@@ -132,6 +127,7 @@
         <button id="btnFlip" class="hidden" onclick="flipCamera()">🔄 Caméra avant / arrière</button>
         <button id="btnPickMic" onclick="switchDevice('audioinput')">🎙️ Changer le micro</button>
         <button id="btnPickCam" onclick="switchDevice('videoinput')">📷 Changer la caméra</button>
+        <button onclick="showDiag()">🛠️ Diagnostic (copier)</button>
         <button onclick="toggleDataSaver()">📶 <span id="dsLabel">Mode basse connexion : ON</span></button>
       </div>
     </div>
@@ -151,7 +147,10 @@
 
   </div>
 
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script src="script.js?v=6"></script>
+  <!-- PeerJS hébergé avec le site (évite qu'un filtre réseau bloque le CDN), avec CDN en secours -->
+  <script src="peerjs.min.js?v=7"></script>
+  <script>if (typeof Peer === 'undefined') document.write('<script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"><\/script>');</script>
+  <script>if (typeof Peer === 'undefined') document.write('<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"><\/script>');</script>
+  <script src="script.js?v=7"></script>
 </body>
 </html>
