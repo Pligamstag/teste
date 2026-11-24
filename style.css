@@ -357,18 +357,51 @@ input::placeholder { color: #6b6f75; }
 
 /* ============ Responsive ============ */
 @media (max-width: 780px) {
-  #stage { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; padding: 8px; gap: 8px; }
-  .tile .avatar { width: 70px; height: 70px; font-size: 28px; }
-  .ctrl { min-width: 52px; padding: 6px 8px; }
-  .ctrl .ico { font-size: 18px; }
+  /* L'autre personne en grand, ma vignette en incrustation (comme Meet/FaceTime) */
+  #stage { position: relative; display: block; padding: 8px; }
+  #remoteTile { position: absolute; inset: 8px; }
+  #selfTile {
+    position: absolute;
+    right: 16px; bottom: 16px;
+    width: 28vw; max-width: 140px; min-width: 96px;
+    aspect-ratio: 3 / 4;
+    z-index: 5;
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+  }
+  #selfTile .avatar { width: 44px; height: 44px; font-size: 18px; }
+  #selfTile .label { bottom: 6px; left: 6px; padding: 2px 8px; font-size: 11px;
+    max-width: calc(100% - 12px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile .avatar { width: 80px; height: 80px; font-size: 32px; }
+
+  /* Barre de contrôles : une seule ligne, boutons faciles à toucher */
+  #bar { flex-wrap: nowrap; gap: 6px; padding: 10px 8px calc(10px + env(safe-area-inset-bottom)); }
+  .ctrl { flex: 1 1 0; min-width: 0; max-width: 56px; min-height: 46px; padding: 6px 4px; justify-content: center; }
+  .ctrl .ico { font-size: 20px; }
   .ctrl .lbl { display: none; }
+  #btnFull { display: none; }               /* inutile sur téléphone */
+  #emojiPanel, #menu { bottom: calc(70px + env(safe-area-inset-bottom)); right: 8px; }
+  #menu button { padding: 14px 14px; font-size: 14px; }
+
+  #topbar { padding: calc(8px + env(safe-area-inset-top)) 12px 8px; }
+  #clock { display: none; }
   #chatPanel { width: 100vw; max-width: 100vw; }
+  #chatForm { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  input { font-size: 16px; }                /* évite le zoom automatique d'iOS */
+  #join { padding: 16px; align-items: flex-start; }
+  .join-card { margin: auto; padding: 22px 18px; }
 }
 @media (max-width: 420px) {
-  #bar { gap: 6px; padding: 10px 8px; }
-  .ctrl { min-width: 46px; }
-  #topbar { padding: 8px 12px; }
+  #topbar { padding-left: 10px; padding-right: 10px; }
   .topbar-left .title { font-size: 14px; }
+  .net-badge { font-size: 11px; padding: 3px 8px; }
+  #code_out { font-size: 22px; letter-spacing: 4px; }
+}
+/* Téléphone en paysage : peu de hauteur */
+@media (max-height: 480px) and (orientation: landscape) {
+  #topbar { display: none; }
+  #bar { padding-top: 6px; padding-bottom: 6px; }
+  #stage { padding: 6px; }
 }
 
 /* Réduction de mouvement */
