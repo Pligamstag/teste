@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#202124">
   <title>Pli Call</title>
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
 
@@ -49,6 +49,11 @@
       <button class="btn" onclick="joinRoom()">
         <span>🔗</span> Rejoindre une réunion
       </button>
+
+      <label class="check">
+        <input type="checkbox" id="strictNet">
+        <span>Réseau strict <span class="muted">(lycée, entreprise : passe par le relais sécurisé)</span></span>
+      </label>
 
       <div id="status" class="muted"></div>
 
@@ -147,6 +152,6 @@
   </div>
 
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script src="script.js?v=5"></script>
+  <script src="script.js?v=6"></script>
 </body>
 </html>
