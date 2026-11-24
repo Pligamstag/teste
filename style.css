@@ -120,6 +120,8 @@ input::placeholder { color: #6b6f75; }
   border: 1px dashed var(--line);
   margin: 6px 0;
 }
+.check { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; cursor: pointer; line-height: 1.4; }
+.check input { width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0; accent-color: var(--primary-strong); }
 .quality-hint {
   margin-top: 6px;
   padding: 10px 12px;
