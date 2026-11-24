@@ -3,70 +3,146 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>Pli Call - Plipli Corp</title>
+  <meta name="theme-color" content="#202124">
+  <title>Pli Call</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-  <!-- ACCUEIL -->
+  <!-- ================= ÉCRAN D'ACCUEIL ================= -->
   <div id="join">
-    <div class="card">
-      <h1 style="text-align:center;margin:0">Pli Call</h1>
-      <input id="name" placeholder="Votre pseudo">
-      <button class="primary" onclick="createRoom()">Créer une réunion</button>
-      <div id="inviteBox" class="hidden">
-        <div class="muted">Code de la réunion :</div>
-        <div id="code_out"></div>
-        <button onclick="copyCode()">Copier le code</button>
-        <button class="primary" onclick="enterCall()">Entrer dans la réunion</button>
+    <div class="join-card">
+      <div class="brand">
+        <div class="brand-logo">P</div>
+        <div>
+          <h1>Pli Call</h1>
+          <p class="muted">Visioconférence légère</p>
+        </div>
       </div>
-      <hr style="border:0;border-top:1px solid var(--line);width:100%">
-      <input id="code" placeholder="Code de la réunion">
-      <button onclick="joinRoom()">Rejoindre</button>
-      <div id="status"></div>
+
+      <label class="field">
+        <span class="muted">Votre pseudo</span>
+        <input id="name" placeholder="Ex : Alex" autocomplete="off">
+      </label>
+
+      <button class="btn primary" onclick="createRoom()">
+        <span>➕</span> Créer une réunion
+      </button>
+
+      <div id="inviteBox" class="hidden">
+        <div class="muted" style="margin-top:8px">Code de la réunion :</div>
+        <div id="code_out"></div>
+        <div class="row">
+          <button class="btn" onclick="copyCode()">📋 Copier</button>
+          <button class="btn primary" onclick="enterCall()">Rejoindre</button>
+        </div>
+        <div id="copyHint" class="muted hidden">✓ Code copié</div>
+      </div>
+
+      <div class="divider"><span>ou</span></div>
+
+      <label class="field">
+        <span class="muted">Code de la réunion</span>
+        <input id="code" placeholder="Ex : AB12CD" autocomplete="off">
+      </label>
+
+      <button class="btn" onclick="joinRoom()">
+        <span>🔗</span> Rejoindre une réunion
+      </button>
+
+      <div id="status" class="muted"></div>
+
+      <div class="quality-hint">
+        <b>Mode basse connexion activé</b><br>
+        <span class="muted">Audio prioritaire, vidéo allégée automatiquement.</span>
+      </div>
     </div>
   </div>
 
-  <!-- APPEL -->
+  <!-- ================= ÉCRAN D'APPEL ================= -->
   <div id="call">
-    <div id="stage">
+
+    <!-- Top bar -->
+    <header id="topbar">
+      <div class="topbar-left">
+        <div class="logo-mini">P</div>
+        <div>
+          <div class="title">Pli Call</div>
+          <div class="muted" id="roomLabel">—</div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div id="netBadge" class="net-badge">
+          <span class="dot"></span> Connexion
+        </div>
+        <div id="clock" class="muted"></div>
+      </div>
+    </header>
+
+    <!-- Zone vidéo -->
+    <main id="stage">
       <div class="tile" id="remoteTile">
         <video id="remote" autoplay playsinline></video>
-        <div class="avatar" id="remoteAvatar"></div>
+        <div class="avatar" id="remoteAvatar">?</div>
         <div class="label" id="remoteLabel">En attente…</div>
+        <div class="quality-tag" id="remoteQuality"></div>
       </div>
       <div class="tile" id="selfTile">
         <video id="local" autoplay muted playsinline></video>
-        <div class="avatar" id="selfAvatar"></div>
-        <div class="label" id="selfLabel"></div>
+        <div class="avatar" id="selfAvatar">?</div>
+        <div class="label" id="selfLabel">Moi</div>
+        <div class="quality-tag" id="selfQuality"></div>
       </div>
-    </div>
+    </main>
+
+    <!-- Barre de contrôles flottante -->
     <div id="bar">
-      <button id="btnMic" title="Micro" onclick="toggleMic()">🎤</button>
-      <button id="btnCam" title="Caméra" onclick="toggleCam()">📷</button>
-      <button title="Partager l'écran" onclick="toggleScreen()">🖥️</button>
-      <button title="Emojis" onclick="toggleEmoji()">😀</button>
-      <button title="Chat" onclick="toggleChat()">💬</button>
-      <button title="Plein écran" onclick="toggleFull()">⛶</button>
-      <button title="Paramètres" onclick="toggleMenu()">⚙️</button>
-      <button class="wide danger" onclick="hangup()">Quitter</button>
+      <button id="btnMic" class="ctrl" title="Micro (M)" onclick="toggleMic()">
+        <span class="ico">🎤</span><span class="lbl">Micro</span>
+      </button>
+      <button id="btnCam" class="ctrl" title="Caméra (V)" onclick="toggleCam()">
+        <span class="ico">📷</span><span class="lbl">Caméra</span>
+      </button>
+      <button class="ctrl" title="Partager l'écran" onclick="toggleScreen()">
+        <span class="ico">🖥️</span><span class="lbl">Écran</span>
+      </button>
+      <button class="ctrl" title="Emoji" onclick="toggleEmoji()">
+        <span class="ico">😀</span><span class="lbl">Réaction</span>
+      </button>
+      <button class="ctrl" title="Chat" onclick="toggleChat()">
+        <span class="ico">💬</span><span class="lbl">Chat</span>
+      </button>
+      <button class="ctrl" title="Plein écran" onclick="toggleFull()">
+        <span class="ico">⛶</span><span class="lbl">Plein écran</span>
+      </button>
+      <button class="ctrl" title="Paramètres" onclick="toggleMenu()">
+        <span class="ico">⚙️</span><span class="lbl">Options</span>
+      </button>
+      <button class="ctrl danger" title="Quitter" onclick="hangup()">
+        <span class="ico">✕</span><span class="lbl">Quitter</span>
+      </button>
+
       <div id="emojiPanel"></div>
       <div id="menu">
-        <button onclick="switchDevice('audioinput')">Changer le micro</button>
-        <button onclick="switchDevice('videoinput')">Changer la caméra</button>
+        <button onclick="switchDevice('audioinput')">🎙️ Changer le micro</button>
+        <button onclick="switchDevice('videoinput')">📷 Changer la caméra</button>
+        <button onclick="toggleDataSaver()">📶 <span id="dsLabel">Mode basse connexion : ON</span></button>
       </div>
     </div>
-  </div>
 
-  <div id="chatPanel">
-    <div style="padding:10px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
-      <b>Chat</b><button onclick="toggleChat()">✕</button>
-    </div>
-    <div id="chatLog"></div>
-    <form id="chatForm" onsubmit="sendChat(event)">
-      <input id="chatInput" placeholder="Écrire un message">
-      <button class="primary">OK</button>
-    </form>
+    <!-- Sidebar chat -->
+    <aside id="chatPanel">
+      <div class="chat-head">
+        <b>Chat</b>
+        <button class="icon-btn" onclick="toggleChat()">✕</button>
+      </div>
+      <div id="chatLog"></div>
+      <form id="chatForm" onsubmit="sendChat(event)">
+        <input id="chatInput" placeholder="Écrire un message…" autocomplete="off">
+        <button class="btn primary">Envoyer</button>
+      </form>
+    </aside>
+
   </div>
 
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
