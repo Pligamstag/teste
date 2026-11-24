@@ -189,15 +189,22 @@ async function enterCall() {
   // Créer le peer :
   //  - l'hôte prend l'ID fixe "pli-CODE"
   //  - l'invité prend un ID aléatoire et appelle l'hôte
+  // "Réseau strict" (lycée, entreprise) : tout passe par le relais TURN en TLS/443,
+  // ce qui ressemble à du HTTPS et traverse la plupart des pare-feux.
+  const strict = !!($('strictNet') && $('strictNet').checked);
+  try { localStorage.setItem('pliStrict', strict ? '1' : '0'); } catch (e) {}
+
+  const TURN_USER = '403d8a7db25a819098d7d8c9';
+  const TURN_PASS = 'go7c76Oi2qYbDGN1';
   const peerConfig = {
     config: {
+      iceTransportPolicy: strict ? 'relay' : 'all',
       iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        // Relais TURN public (nécessaire derrière 4G / box stricte)
-        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+        { urls: 'stun:stun.relay.metered.ca:80' },
+        { urls: 'turn:global.relay.metered.ca:80', username: TURN_USER, credential: TURN_PASS },
+        { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: TURN_USER, credential: TURN_PASS },
+        { urls: 'turn:global.relay.metered.ca:443', username: TURN_USER, credential: TURN_PASS },
+        { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: TURN_USER, credential: TURN_PASS }
       ]
     }
   };
@@ -775,6 +782,7 @@ window.addEventListener('DOMContentLoaded', () => {
   try {
     const saved = localStorage.getItem('pliPseudo');
     if (saved && !$('name').value) $('name').value = saved;
+    if (localStorage.getItem('pliStrict') === '1' && $('strictNet')) $('strictNet').checked = true;
   } catch (e) {}
 
   // Adapter l'interface à l'appareil
