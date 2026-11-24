@@ -5,6 +5,8 @@
 let peer = null;
 let currentCall = null;
 let dataConn = null;
+let joinTimer = null;
+let peerOpened = false;
 let isHost = false;
 let myName = 'Anonyme';
 let remoteName = 'Correspondant';
@@ -145,7 +147,7 @@ async function enterCall() {
 
   // Acquérir le flux réel
   try {
-    localStream = await navigator.mediaDevices.getUserMedia(getConstraintsForQuality(quality));
+    localStream = await getLocalMedia();
     $('local').srcObject = localStream;
     $('selfAvatar').style.display = 'none';
     keepAwake();
@@ -164,6 +166,12 @@ async function enterCall() {
         if (isCamOn) $('selfAvatar').style.display = 'none';
       };
       if (camTrack.muted) warn();
+    } else {
+      // Pas de caméra (refusée ou absente) : on rejoint en audio seul
+      isCamOn = false;
+      $('local').style.display = 'none';
+      $('selfAvatar').style.display = 'flex';
+      $('btnCam').classList.add('off');
     }
 
     if (quality === 'audio') {
@@ -172,7 +180,9 @@ async function enterCall() {
       $('btnCam').classList.add('off');
     }
   } catch (err) {
-    alert('Impossible d\'accéder à la caméra/micro : ' + err.message);
+    alert('Impossible d\'accéder au micro : ' + err.message +
+      '\nAutorise le micro (et la caméra) pour ce site dans le navigateur, puis réessaie.');
+    hangup();
     return;
   }
 
@@ -192,9 +202,16 @@ async function enterCall() {
     }
   };
   const hostId = 'pli-' + roomCode;
+  if (typeof Peer === 'undefined') {
+    alert('Impossible de charger le service d\'appel (PeerJS). Vérifie ta connexion internet et recharge la page.');
+    hangup();
+    return;
+  }
+  peerOpened = false;
   peer = isHost ? new Peer(hostId, peerConfig) : new Peer(peerConfig);
 
   peer.on('open', (id) => {
+    peerOpened = true;
     console.log('Peer connecté :', id);
     $('remoteLabel').textContent = isHost ? 'En attente d\'un participant…' : 'Connexion à la réunion…';
     if (!isHost) connectToHost(hostId);
@@ -220,13 +237,41 @@ async function enterCall() {
     } else if (err.type === 'peer-unavailable') {
       alert('Réunion introuvable. Vérifie le code, et que l\'hôte a bien cliqué sur « Rejoindre ».');
       hangup();
-    } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error') {
-      $('remoteLabel').textContent = 'Problème de connexion au serveur…';
+    } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed') {
+      if (!peerOpened) {
+        alert('Le serveur de connexion ne répond pas. Réessaie dans un instant.');
+        hangup();
+      } else {
+        $('remoteLabel').textContent = 'Problème de connexion au serveur…';
+      }
+    } else {
+      $('remoteLabel').textContent = 'Erreur de connexion (' + err.type + ')';
     }
   });
 }
 
+// Micro + caméra, avec repli en audio seul si la caméra est refusée ou absente
+async function getLocalMedia() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error('connexion non sécurisée : le site doit être ouvert en HTTPS');
+  }
+  try {
+    return await navigator.mediaDevices.getUserMedia(getConstraintsForQuality(quality));
+  } catch (e) {
+    if (quality === 'audio') throw e;
+    console.warn('Caméra indisponible, passage en audio seul :', e);
+    return await navigator.mediaDevices.getUserMedia(getConstraintsForQuality('audio'));
+  }
+}
+
 function connectToHost(hostId) {
+  // Si l'hôte ne répond pas, on le dit au lieu de rester bloqué
+  clearTimeout(joinTimer);
+  joinTimer = setTimeout(() => {
+    if (!$('remote').srcObject) {
+      $('remoteLabel').textContent = 'Pas de réponse. Vérifie le code et que l\'hôte est bien dans l\'appel.';
+    }
+  }, 20000);
   setupData(peer.connect(hostId, { reliable: true }));
   const call = peer.call(hostId, localStream);
   if (!call) return;
@@ -687,6 +732,7 @@ document.addEventListener('visibilitychange', () => {
 
 // ---- Quitter ----
 function hangup() {
+  clearTimeout(joinTimer);
   if (currentCall) currentCall.close();
   if (dataConn) dataConn.close();
   if (peer) peer.destroy();
@@ -733,16 +779,18 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // Adapter l'interface à l'appareil
   const isTouch = window.matchMedia('(pointer: coarse)').matches;
+  const hide = (id) => { const el = $(id); if (el) el.style.display = 'none'; };
   if (!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)) {
-    $('btnScreen').style.display = 'none';       // pas de partage d'écran sur mobile
+    hide('btnScreen');                           // pas de partage d'écran sur mobile
   }
   if (!document.documentElement.requestFullscreen) {
-    $('btnFull').style.display = 'none';         // iPhone / Safari
+    hide('btnFull');                             // iPhone / Safari
   }
   if (isTouch) {
-    $('btnFlip').classList.remove('hidden');     // caméra avant/arrière
-    $('btnPickCam').style.display = 'none';      // sélecteur par prompt() peu adapté au tactile
-    $('btnPickMic').style.display = 'none';
+    const flip = $('btnFlip');
+    if (flip) flip.classList.remove('hidden');   // caméra avant/arrière
+    hide('btnPickCam');                          // sélecteur par prompt() peu adapté au tactile
+    hide('btnPickMic');
   }
   // L'aperçu caméra à l'accueil n'est plus lancé : il allumait la caméra
   // (et demandait l'autorisation) avant même de rejoindre un appel.
