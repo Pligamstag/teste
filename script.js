@@ -226,11 +226,34 @@ function setupData(conn) {
 }
 
 function attachRemote(call) {
+  // Suivi de l'état réel de la connexion réseau (diagnostic visible)
+  const pc = call.peerConnection;
+  if (pc) {
+    pc.oniceconnectionstatechange = () => {
+      const s = pc.iceConnectionState;
+      console.log('ICE :', s);
+      if (s === 'checking') $('remoteLabel').textContent = 'Connexion en cours…';
+      if (s === 'connected' || s === 'completed') $('remoteLabel').textContent = remoteName;
+      if (s === 'disconnected') $('remoteLabel').textContent = 'Connexion instable…';
+      if (s === 'failed') {
+        $('remoteLabel').textContent = 'Échec : réseau bloqué entre vous deux';
+        try { pc.restartIce(); } catch (e) {}
+      }
+    };
+  }
+
   call.on('stream', (remoteStream) => {
-    $('remote').srcObject = remoteStream;
-    $('remote').style.display = 'block';
+    const v = $('remote');
+    v.srcObject = remoteStream;
+    v.style.display = 'block';
     $('remoteAvatar').style.display = 'none';
     $('remoteLabel').textContent = remoteName;
+    // Forcer la lecture (certains navigateurs bloquent l'autoplay avec son)
+    const p = v.play();
+    if (p && p.catch) p.catch(() => {
+      $('remoteLabel').textContent = 'Touche l\'écran pour activer le son';
+      document.addEventListener('click', () => v.play(), { once: true });
+    });
   });
   call.on('close', () => {
     $('remote').srcObject = null;
