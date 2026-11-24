@@ -6,7 +6,10 @@ let peer = null;
 let currentCall = null;
 let dataConn = null;
 let joinTimer = null;
+let openTimer = null;
 let peerOpened = false;
+let usingRelay = false;
+const dbgLines = [];
 let isHost = false;
 let myName = 'Anonyme';
 let remoteName = 'Correspondant';
@@ -186,19 +189,41 @@ async function enterCall() {
     return;
   }
 
-  // Créer le peer :
-  //  - l'hôte prend l'ID fixe "pli-CODE"
-  //  - l'invité prend un ID aléatoire et appelle l'hôte
-  // "Réseau strict" (lycée, entreprise) : tout passe par le relais TURN en TLS/443,
-  // ce qui ressemble à du HTTPS et traverse la plupart des pare-feux.
-  const strict = !!($('strictNet') && $('strictNet').checked);
-  try { localStorage.setItem('pliStrict', strict ? '1' : '0'); } catch (e) {}
+  startPeer(false);
+}
+
+// ---- Diagnostic (copiable depuis Options) ----
+function dbg(msg) {
+  const t = new Date().toLocaleTimeString('fr-FR');
+  dbgLines.push(t + ' ' + msg);
+  if (dbgLines.length > 80) dbgLines.shift();
+  console.log('[pli]', msg);
+}
+async function showDiag() {
+  $('menu').classList.remove('show');
+  const text = 'Pli Call — ' + (isHost ? 'hôte' : 'invité') + ' — ' + navigator.userAgent + '\n' + dbgLines.join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    alert('Diagnostic copié, colle-le dans la discussion.\n\n' + dbgLines.slice(-12).join('\n'));
+  } catch (e) {
+    alert(dbgLines.slice(-15).join('\n'));
+  }
+}
+
+// Crée (ou recrée) la connexion au serveur de mise en relation.
+//  - l'hôte prend l'ID fixe "pli-CODE", l'invité un ID aléatoire et appelle l'hôte
+//  - relayOnly = true : tout passe par le relais TURN chiffré (TLS/443), qui ressemble
+//    à du HTTPS et traverse la plupart des pare-feux (lycée, entreprise…).
+//    C'est activé automatiquement si la connexion directe échoue.
+function startPeer(relayOnly) {
+  usingRelay = relayOnly;
+  dbg('Connexion au serveur de mise en relation (' + (relayOnly ? 'relais sécurisé seul' : 'automatique') + ')');
 
   const TURN_USER = '403d8a7db25a819098d7d8c9';
   const TURN_PASS = 'go7c76Oi2qYbDGN1';
   const peerConfig = {
     config: {
-      iceTransportPolicy: strict ? 'relay' : 'all',
+      iceTransportPolicy: relayOnly ? 'relay' : 'all',
       iceServers: [
         { urls: 'stun:stun.relay.metered.ca:80' },
         { urls: 'turn:global.relay.metered.ca:80', username: TURN_USER, credential: TURN_PASS },
@@ -215,29 +240,44 @@ async function enterCall() {
     return;
   }
   peerOpened = false;
+  clearTimeout(openTimer);
+  // Si le serveur de mise en relation ne répond jamais (réseau qui le bloque)
+  openTimer = setTimeout(() => {
+    if (!peerOpened && peer) {
+      dbg('Serveur de mise en relation injoignable (15 s)');
+      alert('Impossible de joindre le serveur de connexion (réseau qui le bloque ?).\nEssaie avec un autre réseau (4G, partage de connexion).');
+      hangup();
+    }
+  }, 15000);
   peer = isHost ? new Peer(hostId, peerConfig) : new Peer(peerConfig);
 
   peer.on('open', (id) => {
     peerOpened = true;
-    console.log('Peer connecté :', id);
+    clearTimeout(openTimer);
+    dbg('Serveur joint, mon id = ' + id);
     $('remoteLabel').textContent = isHost ? 'En attente d\'un participant…' : 'Connexion à la réunion…';
     if (!isHost) connectToHost(hostId);
   });
 
   // L'hôte reçoit l'appel et le canal de données
   peer.on('call', (call) => {
+    dbg('Appel entrant');
+    if (currentCall) { currentCall._ignoreClose = true; try { currentCall.close(); } catch (e) {} }
     call.answer(localStream);
     currentCall = call;
     attachRemote(call);
   });
   peer.on('connection', (conn) => setupData(conn));
 
+  const me = peer;
   peer.on('disconnected', () => {
-    try { peer.reconnect(); } catch (e) {}
+    if (me !== peer) return;   // ancien peer remplacé (bascule relais) : on ne le reconnecte pas
+    try { me.reconnect(); } catch (e) {}
   });
 
   peer.on('error', (err) => {
     console.error(err);
+    dbg('Erreur PeerJS : ' + err.type);
     if (err.type === 'unavailable-id') {
       alert('Ce code de réunion est déjà utilisé.');
       hangup();
@@ -271,14 +311,29 @@ async function getLocalMedia() {
   }
 }
 
+// Invité : si la connexion directe n'aboutit pas, on retente tout via le relais sécurisé
+function retryWithRelay() {
+  if (usingRelay || isHost || !localStream) return;
+  dbg('Pas de connexion directe : bascule automatique en mode relais sécurisé');
+  clearTimeout(joinTimer);
+  if (currentCall) { currentCall._ignoreClose = true; try { currentCall.close(); } catch (e) {} }
+  try { if (dataConn) dataConn.close(); } catch (e) {}
+  try { if (peer) peer.destroy(); } catch (e) {}
+  currentCall = null; dataConn = null; peer = null;
+  $('remote').srcObject = null;
+  $('remoteLabel').textContent = 'Nouvelle tentative via le relais sécurisé…';
+  startPeer(true);
+}
+
 function connectToHost(hostId) {
-  // Si l'hôte ne répond pas, on le dit au lieu de rester bloqué
+  // Pas de flux après 10 s → on bascule sur le relais ; puis message clair si ça échoue encore
   clearTimeout(joinTimer);
   joinTimer = setTimeout(() => {
-    if (!$('remote').srcObject) {
-      $('remoteLabel').textContent = 'Pas de réponse. Vérifie le code et que l\'hôte est bien dans l\'appel.';
-    }
-  }, 20000);
+    if ($('remote').srcObject) return;
+    if (!usingRelay) retryWithRelay();
+    else $('remoteLabel').textContent = 'Pas de réponse. Vérifie le code et que l\'hôte est bien dans l\'appel.';
+  }, usingRelay ? 20000 : 10000);
+  dbg('Appel de l\'hôte ' + hostId);
   setupData(peer.connect(hostId, { reliable: true }));
   const call = peer.call(hostId, localStream);
   if (!call) return;
@@ -299,18 +354,25 @@ function setupData(conn) {
 function attachRemote(call) {
   // Suivi de l'état réel de la connexion réseau (diagnostic visible)
   const pc = call.peerConnection;
-  if (pc) {
-    pc.oniceconnectionstatechange = () => {
+  if (pc && pc.addEventListener) {
+    // addEventListener (et pas onXxx) pour ne pas écraser les handlers internes de PeerJS
+    pc.addEventListener('icecandidate', (e) => {
+      if (e.candidate) dbg('candidat ' + e.candidate.type + ' ' + (e.candidate.protocol || ''));
+    });
+    pc.addEventListener('icecandidateerror', (e) => dbg('erreur serveur ' + (e.url || '') + ' code ' + e.errorCode));
+    pc.addEventListener('iceconnectionstatechange', () => {
       const s = pc.iceConnectionState;
-      console.log('ICE :', s);
+      dbg('ICE : ' + s);
+      if (call._ignoreClose) return;
       if (s === 'checking') $('remoteLabel').textContent = 'Connexion en cours…';
       if (s === 'connected' || s === 'completed') $('remoteLabel').textContent = remoteName;
       if (s === 'disconnected') $('remoteLabel').textContent = 'Connexion instable…';
       if (s === 'failed') {
+        if (!isHost && !usingRelay) return retryWithRelay();
         $('remoteLabel').textContent = 'Échec : réseau bloqué entre vous deux';
         try { pc.restartIce(); } catch (e) {}
       }
-    };
+    });
   }
 
   call.on('stream', (remoteStream) => {
@@ -326,6 +388,8 @@ function attachRemote(call) {
     });
   });
   call.on('close', () => {
+    if (call._ignoreClose) return;
+    dbg('Appel terminé');
     $('remote').srcObject = null;
     $('remote').style.display = 'none';
     $('remoteAvatar').style.display = 'flex';
@@ -740,6 +804,8 @@ document.addEventListener('visibilitychange', () => {
 // ---- Quitter ----
 function hangup() {
   clearTimeout(joinTimer);
+  clearTimeout(openTimer);
+  usingRelay = false;
   if (currentCall) currentCall.close();
   if (dataConn) dataConn.close();
   if (peer) peer.destroy();
@@ -782,7 +848,6 @@ window.addEventListener('DOMContentLoaded', () => {
   try {
     const saved = localStorage.getItem('pliPseudo');
     if (saved && !$('name').value) $('name').value = saved;
-    if (localStorage.getItem('pliStrict') === '1' && $('strictNet')) $('strictNet').checked = true;
   } catch (e) {}
 
   // Adapter l'interface à l'appareil
