@@ -4,17 +4,6 @@
 
 let peer = null;
 let currentCall = null;
-let dataConn = null;
-let joinTimer = null;
-let openTimer = null;
-let peerOpened = false;
-let usingRelay = false;
-let redials = 0;
-let discTimer = null;
-const dbgLines = [];
-let isHost = false;
-let myName = 'Anonyme';
-let remoteName = 'Correspondant';
 let localStream = null;
 let screenStream = null;
 let roomCode = null;
@@ -33,56 +22,49 @@ const QUALITY_PRESETS = {
   audio:  { width: 0,   height: 0,   fps: 0,  bitrate: 0 }
 };
 
-// ============================================================
-// 1. PREVIEW À L'ACCUEIL
-// ============================================================
-async function initPreview() {
-  try {
-    const constraints = getConstraintsForQuality(quality);
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-    const preview = $('preview');
-    if (preview) {
-      preview.srcObject = stream;
-      preview.muted = true;
-    }
-    // On garde le stream pour l'utiliser au moment d'entrer
-    window._previewStream = stream;
-  } catch (e) {
-    console.warn('Aperçu impossible :', e);
-  }
+// Serveurs ICE Metered : TURN permet de relayer le média lorsque la connexion directe échoue.
+const ICE_SERVERS = [
+  { urls: 'stun:stun.relay.metered.ca:80' },
+  {
+    urls: [
+      'turn:global.relay.metered.ca:80',
+      'turn:global.relay.metered.ca:80?transport=tcp',
+      'turn:global.relay.metered.ca:443',
+      'turns:global.relay.metered.ca:443?transport=tcp'
+    ],
+    username: '403d8a7db25a819098d7d8c9',
+    credential: 'go7c76Oi2qYbDGN1'
+  },
+  { urls: 'stun:stun.l.google.com:19302' }
+];
+
+let roomHost = false;
+let peerOpenTimer = null;
+let remoteStreamTimer = null;
+let iceDisconnectTimer = null;
+let iceFailureTimer = null;
+let iceRestartAttempted = false;
+let dataSaverEnabled = true;
+const SIGNAL_TIMEOUT_MS = 12000;
+const REMOTE_STREAM_TIMEOUT_MS = 30000;
+const ICE_GRACE_MS = 8000;
+
+function setConnectionMessage(message) {
+  const status = $('callStatus');
+  if (status) status.textContent = message;
+  const joinStatus = $('status');
+  if (joinStatus) joinStatus.textContent = message;
 }
 
-function getConstraintsForQuality(q) {
-  const p = QUALITY_PRESETS[q] || QUALITY_PRESETS.low;
-  if (q === 'audio') {
-    return { video: false, audio: { echoCancellation: true, noiseSuppression: true } };
-  }
-  return {
-    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-    video: {
-      width: { ideal: p.width },
-      height: { ideal: p.height },
-      frameRate: { ideal: p.fps, max: p.fps }
-    }
-  };
+function clearConnectionTimers() {
+  [peerOpenTimer, remoteStreamTimer, iceDisconnectTimer, iceFailureTimer].forEach(id => {
+    if (id !== null) clearTimeout(id);
+  });
+  peerOpenTimer = remoteStreamTimer = iceDisconnectTimer = iceFailureTimer = null;
 }
 
-function togglePreviewCam() {
-  const s = window._previewStream;
-  if (!s) return;
-  const t = s.getVideoTracks()[0];
-  if (!t) return;
-  t.enabled = !t.enabled;
-  $('btnPreviewCam').classList.toggle('off', !t.enabled);
-}
-
-function togglePreviewMic() {
-  const s = window._previewStream;
-  if (!s) return;
-  const t = s.getAudioTracks()[0];
-  if (!t) return;
-  t.enabled = !t.enabled;
-  $('btnPreviewMic').classList.toggle('off', !t.enabled);
+function reportBlockedNetwork() {
+  setConnectionMessage('Connexion média impossible : réseau possiblement bloqué (UDP/NAT). Un TURN TCP/TLS sur 443 est nécessaire sur certains réseaux.');
 }
 
 // ============================================================
@@ -92,7 +74,7 @@ function createRoom() {
   const name = $('name').value.trim();
   if (!name) return alert('Renseigne un pseudo.');
   roomCode = generateCode();
-  isHost = true;
+  roomHost = true;
   $('code_out').textContent = roomCode;
   $('inviteBox').classList.remove('hidden');
 }
@@ -109,15 +91,10 @@ function copyCode() {
 }
 
 function joinRoom() {
-  const name = $('name').value.trim();
-  if (!name) {
-    $('name').focus();
-    return alert('Renseigne ton pseudo avant de rejoindre.');
-  }
   const code = $('code').value.trim().toUpperCase();
   if (!code) return alert('Renseigne un code.');
   roomCode = code;
-  isHost = false;
+  roomHost = false;
   enterCall();
 }
 
@@ -125,60 +102,26 @@ function joinRoom() {
 // 3. ENTRÉE DANS L'APPEL
 // ============================================================
 async function enterCall() {
-  const name = $('name').value.trim();
-  if (!name) {
-    $('name').focus();
-    return alert('Renseigne un pseudo.');
-  }
-  try { localStorage.setItem('pliPseudo', name); } catch (e) {}
-  myName = name;
+  const name = $('name').value.trim() || 'Anonyme';
   $('selfLabel').textContent = name;
   $('selfAvatar').textContent = name[0];
-  $('roomLabel').textContent = 'Code : ' + roomCode;
 
   // Récupérer qualité choisie à l'accueil
-  const q = $('quality') ? $('quality').value : 'low';
-  quality = q;
-
-  // Stopper l'aperçu
-  if (window._previewStream) {
-    window._previewStream.getTracks().forEach(t => t.stop());
-    window._previewStream = null;
-  }
+  quality = 'low';
 
   $('join').style.display = 'none';
   $('call').classList.add('active');
   updateNetBadge();
 
+  if (typeof Peer === 'undefined') {
+    setConnectionMessage('La bibliothèque PeerJS locale est introuvable. Vérifie le déploiement de peerjs.min.js.');
+    return;
+  }
+
   // Acquérir le flux réel
   try {
-    localStream = await getLocalMedia();
+    localStream = await navigator.mediaDevices.getUserMedia(getConstraintsForQuality(quality));
     $('local').srcObject = localStream;
-    $('selfAvatar').style.display = 'none';
-    dbg('Micro/caméra OK (' + localStream.getTracks().map(t => t.kind).join('+') + ')');
-    keepAwake();
-
-    // Détecter une caméra qui ne renvoie aucune image (déjà utilisée ailleurs, masquée…)
-    const camTrack = localStream.getVideoTracks()[0];
-    if (camTrack) {
-      console.log('Caméra :', camTrack.label, camTrack.getSettings());
-      const warn = () => {
-        $('selfLabel').textContent = myName + ' — caméra sans image (déjà utilisée ?)';
-        $('selfAvatar').style.display = 'flex';
-      };
-      camTrack.onmute = warn;
-      camTrack.onunmute = () => {
-        $('selfLabel').textContent = myName;
-        if (isCamOn) $('selfAvatar').style.display = 'none';
-      };
-      if (camTrack.muted) warn();
-    } else {
-      // Pas de caméra (refusée ou absente) : on rejoint en audio seul
-      isCamOn = false;
-      $('local').style.display = 'none';
-      $('selfAvatar').style.display = 'flex';
-      $('btnCam').classList.add('off');
-    }
 
     if (quality === 'audio') {
       $('local').style.display = 'none';
@@ -186,294 +129,144 @@ async function enterCall() {
       $('btnCam').classList.add('off');
     }
   } catch (err) {
-    alert('Impossible d\'accéder au micro : ' + err.message +
-      '\nAutorise le micro (et la caméra) pour ce site dans le navigateur, puis réessaie.');
-    hangup();
+    alert('Impossible d\'accéder à la caméra/micro : ' + err.message);
     return;
   }
 
-  startPeer(false);
-}
-
-// ---- Diagnostic (copiable depuis Options) ----
-function dbg(msg) {
-  const t = new Date().toLocaleTimeString('fr-FR');
-  dbgLines.push(t + ' ' + msg);
-  if (dbgLines.length > 80) dbgLines.shift();
-  console.log('[pli]', msg);
-}
-// Affiche le diagnostic en plein écran (lisible, photographiable : pas besoin de copier-coller)
-function showDiag() {
-  const menu = $('menu'); if (menu) menu.classList.remove('show');
-  const count = (s) => dbgLines.filter(l => l.includes(s)).length;
-  const lastIce = [...dbgLines].reverse().find(l => l.includes('ICE :')) || '—';
-  const summary =
-    'RÉSUMÉ\n' +
-    'Rôle : ' + (isHost ? 'hôte' : 'invité') + ' · mode : ' + (usingRelay ? 'relais seul' : 'automatique') + '\n' +
-    'Serveur de mise en relation joint : ' + (peerOpened ? 'oui' : 'NON') + '\n' +
-    'Candidats → host : ' + count('candidat host') + ' · srflx : ' + count('candidat srflx') +
-    ' · relay : ' + count('candidat relay') + '\n' +
-    'Erreurs serveurs STUN/TURN : ' + count('erreur serveur') + '\n' +
-    'Dernier état ICE : ' + lastIce.replace(/^\S+\s/, '') + '\n' +
-    'Navigateur : ' + navigator.userAgent + '\n\n' +
-    'JOURNAL\n';
-
-  let p = $('diagPanel');
-  if (!p) {
-    p = document.createElement('div');
-    p.id = 'diagPanel';
-    p.style.cssText = 'position:fixed;inset:0;z-index:500;background:#101114;color:#e8eaed;' +
-      'font:13px/1.5 ui-monospace,Consolas,monospace;padding:56px 16px 16px;overflow:auto;' +
-      'white-space:pre-wrap;word-break:break-word;';
-    const close = document.createElement('button');
-    close.textContent = '✕ Fermer';
-    close.style.cssText = 'position:fixed;top:10px;right:10px;z-index:501;';
-    close.onclick = () => { p.style.display = 'none'; close.style.display = 'none'; };
-    p._close = close;
-    document.body.appendChild(p);
-    document.body.appendChild(close);
-  }
-  p.textContent = summary + (dbgLines.length ? dbgLines.join('\n') : '(rien d\'enregistré pour l\'instant : essaie de rejoindre une réunion d\'abord)');
-  p.style.display = 'block';
-  p._close.style.display = 'inline-flex';
-}
-
-// Crée (ou recrée) la connexion au serveur de mise en relation.
-//  - l'hôte prend l'ID fixe "pli-CODE", l'invité un ID aléatoire et appelle l'hôte
-//  - relayOnly = true : tout passe par le relais TURN chiffré (TLS/443), qui ressemble
-//    à du HTTPS et traverse la plupart des pare-feux (lycée, entreprise…).
-//    C'est activé automatiquement si la connexion directe échoue.
-function startPeer(relayOnly) {
-  usingRelay = relayOnly;
-  dbg('Connexion au serveur de mise en relation (' + (relayOnly ? 'relais sécurisé seul' : 'automatique') + ')');
-
-  const TURN_USER = '403d8a7db25a819098d7d8c9';
-  const TURN_PASS = 'go7c76Oi2qYbDGN1';
-  const peerConfig = {
+  // Créer le peer
+  // Le créateur réserve l'identifiant de la salle; le participant entrant obtient
+  // un identifiant PeerJS aléatoire et appelle ensuite l'identifiant de salle.
+  peer = new Peer(roomHost ? 'pli-' + roomCode : undefined, {
+    host: '0.peerjs.com',
+    port: 443,
+    secure: true,
     config: {
-      iceTransportPolicy: relayOnly ? 'relay' : 'all',
-      iceServers: [
-        { urls: 'stun:stun.relay.metered.ca:80' },
-        { urls: 'turn:global.relay.metered.ca:80', username: TURN_USER, credential: TURN_PASS },
-        { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: TURN_USER, credential: TURN_PASS },
-        { urls: 'turn:global.relay.metered.ca:443', username: TURN_USER, credential: TURN_PASS },
-        { urls: 'turns:global.relay.metered.ca:443?transport=tcp', username: TURN_USER, credential: TURN_PASS }
-      ]
+      iceServers: ICE_SERVERS,
+      // iceTransportPolicy volontairement omis : défaut WebRTC = "all".
+      iceCandidatePoolSize: 0
     }
-  };
-  const hostId = 'pli-' + roomCode;
-  if (typeof Peer === 'undefined') {
-    alert('Impossible de charger le service d\'appel (PeerJS). Vérifie ta connexion internet et recharge la page.');
-    hangup();
-    return;
-  }
-  peerOpened = false;
-  clearTimeout(openTimer);
-  // Si le serveur de mise en relation ne répond jamais (réseau qui le bloque)
-  openTimer = setTimeout(() => {
-    if (!peerOpened && peer) {
-      dbg('Serveur de mise en relation injoignable (15 s)');
-      alert('Impossible de joindre le serveur de connexion (réseau qui le bloque ?).\nEssaie avec un autre réseau (4G, partage de connexion).');
-      hangup();
-    }
-  }, 15000);
-  peer = isHost ? new Peer(hostId, peerConfig) : new Peer(peerConfig);
+  });
+
+  let peerOpened = false;
+  peerOpenTimer = setTimeout(() => {
+    if (!peerOpened) setConnectionMessage('Serveur de signalisation PeerJS injoignable. Le réseau peut bloquer 0.peerjs.com / WebSocket (WSS 443).');
+  }, SIGNAL_TIMEOUT_MS);
 
   peer.on('open', (id) => {
     peerOpened = true;
-    clearTimeout(openTimer);
-    dbg('Serveur joint, mon id = ' + id);
-    $('remoteLabel').textContent = isHost ? 'En attente d\'un participant…' : 'Connexion à la réunion…';
-    if (!isHost) connectToHost(hostId);
+    if (peerOpenTimer !== null) clearTimeout(peerOpenTimer);
+    peerOpenTimer = null;
+    console.log('Peer connecté :', id);
+    setConnectionMessage(roomHost ? 'Serveur prêt — en attente du participant…' : 'Serveur connecté — appel de la salle…');
+    if (!roomHost) {
+      const call = peer.call('pli-' + roomCode, localStream);
+      if (!call) {
+        setConnectionMessage('Impossible d’appeler cette salle. Vérifie le code et que l’hôte est connecté.');
+        return;
+      }
+      currentCall = call;
+      attachRemote(call);
+    }
   });
 
-  // L'hôte reçoit l'appel et le canal de données
   peer.on('call', (call) => {
-    dbg('Appel entrant');
-    if (currentCall) { currentCall._ignoreClose = true; try { currentCall.close(); } catch (e) {} }
-    call.answer(localStream);
+    if (!roomHost) {
+      call.close();
+      return;
+    }
     currentCall = call;
     attachRemote(call);
-  });
-  peer.on('connection', (conn) => setupData(conn));
-
-  const me = peer;
-  peer.on('disconnected', () => {
-    if (me !== peer) return;   // ancien peer remplacé (bascule relais) : on ne le reconnecte pas
-    try { me.reconnect(); } catch (e) {}
+    call.answer(localStream);
   });
 
   peer.on('error', (err) => {
     console.error(err);
-    dbg('Erreur PeerJS : ' + err.type);
-    if (err.type === 'unavailable-id') {
-      alert('Ce code de réunion est déjà utilisé.');
-      hangup();
-    } else if (err.type === 'peer-unavailable') {
-      alert('Réunion introuvable. Vérifie le code, et que l\'hôte a bien cliqué sur « Rejoindre ».');
-      hangup();
-    } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' || err.type === 'socket-closed') {
-      if (!peerOpened) {
-        alert('Le serveur de connexion ne répond pas. Réessaie dans un instant.');
-        hangup();
-      } else {
-        $('remoteLabel').textContent = 'Problème de connexion au serveur…';
-      }
-    } else {
-      $('remoteLabel').textContent = 'Erreur de connexion (' + err.type + ')';
-    }
+    const messages = {
+      'unavailable-id': 'Ce code de réunion est déjà utilisé. Choisis une autre salle.',
+      'peer-unavailable': 'Salle ou hôte introuvable. Vérifie le code et que l’hôte a rejoint la réunion.',
+      'network': 'Serveur de signalisation inaccessible : réseau possiblement bloqué (PeerJS / WebSocket).',
+      'socket-error': 'Erreur WebSocket vers le serveur de signalisation PeerJS (filtrage réseau possible).',
+      'socket-closed': 'Connexion au serveur de signalisation PeerJS interrompue.',
+      'server-error': 'Le serveur de signalisation PeerJS a renvoyé une erreur.'
+    };
+    setConnectionMessage(messages[err.type] || 'Erreur PeerJS : ' + (err.type || err.message || 'connexion impossible'));
+    if (err.type === 'unavailable-id') hangup();
   });
-}
-
-// Micro + caméra, avec repli en audio seul si la caméra est refusée ou absente
-async function getLocalMedia() {
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    throw new Error('connexion non sécurisée : le site doit être ouvert en HTTPS');
-  }
-  try {
-    return await navigator.mediaDevices.getUserMedia(getConstraintsForQuality(quality));
-  } catch (e) {
-    if (quality === 'audio') throw e;
-    console.warn('Caméra indisponible, passage en audio seul :', e);
-    return await navigator.mediaDevices.getUserMedia(getConstraintsForQuality('audio'));
-  }
-}
-
-// Invité : si la connexion directe n'aboutit pas, on retente tout via le relais sécurisé
-function retryWithRelay() {
-  if (usingRelay || isHost || !localStream) return;
-  dbg('Pas de connexion directe : bascule automatique en mode relais sécurisé');
-  clearTimeout(joinTimer);
-  if (currentCall) { currentCall._ignoreClose = true; try { currentCall.close(); } catch (e) {} }
-  try { if (dataConn) dataConn.close(); } catch (e) {}
-  try { if (peer) peer.destroy(); } catch (e) {}
-  currentCall = null; dataConn = null; peer = null;
-  $('remote').srcObject = null;
-  $('remoteLabel').textContent = 'Nouvelle tentative via le relais sécurisé…';
-  startPeer(true);
-}
-
-// Invité : relance l'appel (et le canal de chat) vers l'hôte après une coupure, 3 essais max
-function redial() {
-  if (isHost || !peer || peer.destroyed || !localStream) return;
-  if (redials >= 3) {
-    dbg('Reconnexion impossible après 3 essais');
-    $('remoteLabel').textContent = 'Connexion impossible. Quitte et rejoins à nouveau.';
-    return;
-  }
-  redials++;
-  dbg('Reconnexion automatique (' + redials + '/3)');
-  const hostId = 'pli-' + roomCode;
-  if (currentCall) { currentCall._ignoreClose = true; try { currentCall.close(); } catch (e) {} }
-  try { if (dataConn) dataConn.close(); } catch (e) {}
-  $('remoteLabel').textContent = 'Reconnexion…';
-  $('remote').srcObject = null;
-  setupData(peer.connect(hostId, { reliable: true }));
-  const call = peer.call(hostId, localStream);
-  if (!call) return;
-  currentCall = call;
-  attachRemote(call);
-}
-
-function connectToHost(hostId) {
-  // Pas de flux après 10 s → on bascule sur le relais ; puis message clair si ça échoue encore
-  clearTimeout(joinTimer);
-  joinTimer = setTimeout(() => {
-    if ($('remote').srcObject) return;
-    if (!usingRelay) retryWithRelay();
-    else $('remoteLabel').textContent = 'Pas de réponse. Vérifie le code et que l\'hôte est bien dans l\'appel.';
-  }, usingRelay ? 20000 : 10000);
-  dbg('Appel de l\'hôte ' + hostId);
-  setupData(peer.connect(hostId, { reliable: true }));
-  const call = peer.call(hostId, localStream);
-  if (!call) return;
-  currentCall = call;
-  attachRemote(call);
-}
-
-function setupData(conn) {
-  dataConn = conn;
-  conn.on('open', () => {
-    conn.send({ type: 'hello', value: myName });
-    sendCamState();
-  });
-  conn.on('data', handleData);
-  conn.on('close', () => { dataConn = null; });
 }
 
 function attachRemote(call) {
-  // Suivi de l'état réel de la connexion réseau (diagnostic visible)
-  const pc = call.peerConnection;
-  if (pc && pc.addEventListener) {
-    // addEventListener (et pas onXxx) pour ne pas écraser les handlers internes de PeerJS
-    pc.addEventListener('icecandidate', (e) => {
-      if (e.candidate) dbg('candidat ' + e.candidate.type + ' ' + (e.candidate.protocol || ''));
-    });
-    pc.addEventListener('icecandidateerror', (e) => dbg('erreur serveur ' + (e.url || '') + ' code ' + e.errorCode));
-    pc.addEventListener('iceconnectionstatechange', () => {
-      const s = pc.iceConnectionState;
-      dbg('ICE : ' + s);
-      if (call._ignoreClose) return;
-      clearTimeout(discTimer);
-      if (s === 'checking') $('remoteLabel').textContent = 'Connexion en cours…';
-      if (s === 'connected' || s === 'completed') {
-        $('remoteLabel').textContent = remoteName;
-        redials = 0;
-      }
-      if (s === 'disconnected') {
-        $('remoteLabel').textContent = 'Connexion instable…';
-        // Si ça ne revient pas tout seul en 6 s, l'invité relance l'appel
-        discTimer = setTimeout(() => {
-          if (call._ignoreClose || isHost) return;
-          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
-            usingRelay ? redial() : retryWithRelay();
-          }
-        }, 6000);
-      }
-      if (s === 'failed') {
-        if (isHost) { $('remoteLabel').textContent = 'Connexion perdue, en attente de l\'autre personne…'; return; }
-        return usingRelay ? redial() : retryWithRelay();
-      }
-    });
-  }
+  clearTimeout(remoteStreamTimer);
+  remoteStreamTimer = setTimeout(() => {
+    if (currentCall === call && !$('remote').srcObject) reportBlockedNetwork();
+  }, REMOTE_STREAM_TIMEOUT_MS);
+  watchIceConnection(call);
 
   call.on('stream', (remoteStream) => {
-    const v = $('remote');
-    // PeerJS émet cet évènement une fois par piste (audio + vidéo) avec le même flux :
-    // ne pas le réassigner, sinon la lecture en cours est interrompue.
-    if (v.srcObject === remoteStream) { applyRemoteCam(); return; }
-    v.srcObject = remoteStream;
-    $('remoteLabel').textContent = remoteName;
-    dbg('Flux de l\'autre personne reçu (' + remoteStream.getTracks().map(t => t.kind).join('+') + ')');
-    v.style.display = 'block';
-    remoteFrameOk = false;
-    applyRemoteCam();
-    watchRemoteFrames();
-    // Lecture : si le navigateur refuse le son sans clic (NotAllowedError), on lance l'image
-    // en muet et on affiche un vrai bouton « Activer le son » (visible, sur PC comme mobile).
-    v.muted = false;
-    const p = v.play();
-    if (p && p.catch) p.catch((err) => {
-      dbg('lecture : ' + (err && err.name));
-      if (err && err.name === 'NotAllowedError') {
-        v.muted = true;
-        v.play().catch(() => {});
-        showUnmuteButton(v);
-      }
-    });
+    if (remoteStreamTimer !== null) clearTimeout(remoteStreamTimer);
+    remoteStreamTimer = null;
+    $('remote').srcObject = remoteStream;
+    $('remote').style.display = 'block';
+    $('remoteAvatar').style.display = 'none';
+    setConnectionMessage('Appel connecté.');
   });
   call.on('close', () => {
-    if (call._ignoreClose) return;
-    dbg('Appel terminé');
-    clearInterval(frameTimer);
-    remoteFrameOk = false;
-    if ($('unmuteBtn')) $('unmuteBtn').remove();
+    if (remoteStreamTimer !== null) clearTimeout(remoteStreamTimer);
+    remoteStreamTimer = null;
     $('remote').srcObject = null;
     $('remote').style.display = 'none';
     $('remoteAvatar').style.display = 'flex';
     $('remoteLabel').textContent = 'Appel terminé';
+    if (currentCall === call) currentCall = null;
+    setConnectionMessage('Appel terminé.');
   });
-  call.on('error', (e) => console.error('Erreur appel', e));
+  call.on('error', (err) => {
+    console.error('Erreur appel WebRTC :', err);
+    reportBlockedNetwork();
+  });
+  call.on('data', handleData);
+}
+
+function watchIceConnection(call) {
+  const pc = call.peerConnection;
+  if (!pc) {
+    setConnectionMessage('Appel établi; état ICE indisponible dans cette version de PeerJS.');
+    return;
+  }
+  pc.addEventListener('iceconnectionstatechange', () => {
+    const state = pc.iceConnectionState;
+    console.log('État ICE :', state);
+    if (state === 'connected' || state === 'completed') {
+      if (iceDisconnectTimer !== null) clearTimeout(iceDisconnectTimer);
+      if (iceFailureTimer !== null) clearTimeout(iceFailureTimer);
+      iceDisconnectTimer = iceFailureTimer = null;
+      setConnectionMessage('Appel connecté.');
+    } else if (state === 'disconnected') {
+      setConnectionMessage('Connexion instable… tentative de rétablissement.');
+      if (iceDisconnectTimer !== null) clearTimeout(iceDisconnectTimer);
+      iceDisconnectTimer = setTimeout(() => {
+        if (pc.iceConnectionState === 'disconnected') handleIceFailure(pc);
+      }, ICE_GRACE_MS);
+    } else if (state === 'failed') {
+      handleIceFailure(pc);
+    }
+  });
+}
+
+function handleIceFailure(pc) {
+  if (!iceRestartAttempted && pc && typeof pc.restartIce === 'function') {
+    iceRestartAttempted = true;
+    setConnectionMessage('Connexion ICE échouée — tentative de redémarrage…');
+    try {
+      pc.restartIce();
+      iceFailureTimer = setTimeout(() => {
+        if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') reportBlockedNetwork();
+      }, 12000);
+      return;
+    } catch (e) {
+      console.warn('Redémarrage ICE impossible :', e);
+    }
+  }
+  reportBlockedNetwork();
 }
 
 // ============================================================
@@ -497,61 +290,6 @@ function toggleCam() {
   $('btnCam').classList.toggle('off', !isCamOn);
   $('local').style.display = isCamOn ? 'block' : 'none';
   $('selfAvatar').style.display = isCamOn ? 'none' : 'flex';
-  sendCamState();
-}
-
-// Prévient l'autre personne que la caméra est allumée/coupée
-let remoteCamOn = true;
-function sendCamState() {
-  if (dataConn && dataConn.open) dataConn.send({ type: 'cam', value: isCamOn });
-}
-// On montre l'image seulement si l'autre a sa caméra allumée ET que des images arrivent vraiment.
-// Sinon (caméra coupée, absente, ou image toute noire) : avatar. Ça ne dépend plus du seul
-// message « cam », qui n'arrive pas si le canal de données n'a pas pu s'ouvrir.
-let remoteFrameOk = false;
-let frameTimer = null;
-function applyRemoteCam() {
-  const show = remoteCamOn && remoteFrameOk;
-  $('remoteAvatar').style.display = show ? 'none' : 'flex';
-}
-function watchRemoteFrames() {
-  clearInterval(frameTimer);
-  const v = $('remote');
-  let canvas, ctx, dark = 0;
-  try {
-    canvas = document.createElement('canvas');
-    canvas.width = canvas.height = 8;
-    ctx = canvas.getContext('2d', { willReadFrequently: true });
-  } catch (e) { ctx = null; }
-  frameTimer = setInterval(() => {
-    let ok;
-    try {
-      if (!(v.videoWidth > 0 && v.readyState >= 2)) ok = false;       // aucune image reçue
-      else if (!ctx) ok = true;                                        // pas de canvas : on fait confiance
-      else {
-        ctx.drawImage(v, 0, 0, 8, 8);
-        const d = ctx.getImageData(0, 0, 8, 8).data;
-        let sum = 0;
-        for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
-        ok = sum > 64 * 3 * 2;                                         // pas entièrement noir
-      }
-    } catch (e) { ok = true; }
-    if (ok) { dark = 0; if (!remoteFrameOk) { remoteFrameOk = true; applyRemoteCam(); } }
-    else if (++dark >= 3 && remoteFrameOk) { remoteFrameOk = false; applyRemoteCam(); }
-  }, 1000);
-}
-
-function showUnmuteButton(v) {
-  let b = $('unmuteBtn');
-  if (!b) {
-    b = document.createElement('button');
-    b.id = 'unmuteBtn';
-    b.className = 'primary';
-    b.textContent = '🔊 Activer le son';
-    b.style.cssText = 'position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:6;';
-    b.onclick = () => { v.muted = false; v.play().catch(() => {}); b.remove(); };
-    $('remoteTile').appendChild(b);
-  }
 }
 
 // ---- Changement de qualité en direct ----
@@ -559,6 +297,11 @@ async function setQuality(q) {
   quality = q;
   updateNetBadge();
   $('menu').classList.remove('show');
+
+  // Mettre à jour le menu (surligner l'actif)
+  document.querySelectorAll('#menu button[data-q]').forEach(b => {
+    b.classList.toggle('active-q', b.dataset.q === q);
+  });
 
   if (!currentCall || !localStream) return;
 
@@ -667,16 +410,8 @@ function updateNetBadge() {
     high: '✨ Haute qualité',
     audio: '🎧 Audio uniquement'
   };
-  badge.innerHTML = '<span class="dot"></span> ' + (labels[quality] || '');
-  badge.className = 'net-badge ' + (quality === 'high' ? 'warn' : 'ok');
-}
-
-// ---- Mode basse connexion (bouton du menu Options) ----
-function toggleDataSaver() {
-  const lowOn = quality === 'low';
-  $('dsLabel').textContent = 'Mode basse connexion : ' + (lowOn ? 'OFF' : 'ON');
-  $('menu').classList.remove('show');
-  setQuality(lowOn ? 'medium' : 'low');
+  badge.textContent = labels[quality] || '';
+  badge.className = 'net-badge' + (quality === 'high' ? ' warn' : '');
 }
 
 // ---- Partage d'écran ----
@@ -733,8 +468,8 @@ function toggleEmoji() {
 }
 
 function sendEmoji(emoji) {
-  if (dataConn && dataConn.open) {
-    dataConn.send({ type: 'emoji', value: emoji });
+  if (currentCall && currentCall.open) {
+    currentCall.send({ type: 'emoji', value: emoji });
   }
   showFloatingEmoji(emoji);
   $('emojiPanel').classList.remove('show');
@@ -768,11 +503,6 @@ function toggleChat() {
   p.classList.toggle('open');
 }
 
-function switchTab(tab) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.textContent.includes(tab === 'chat' ? 'Chat' : 'Infos')));
-  $('tabChat').classList.toggle('hidden', tab !== 'chat');
-  $('tabInfo').classList.toggle('hidden', tab !== 'info');
-}
 
 function sendChat(ev) {
   ev.preventDefault();
@@ -780,8 +510,8 @@ function sendChat(ev) {
   const text = input.value.trim();
   if (!text) return;
   input.value = '';
-  if (dataConn && dataConn.open) {
-    dataConn.send({ type: 'chat', value: text });
+  if (currentCall && currentCall.open) {
+    currentCall.send({ type: 'chat', value: text });
   }
   addChatMsg('Moi', text, true);
 }
@@ -801,17 +531,16 @@ function escapeHtml(s) {
 }
 
 function handleData(data) {
-  if (data.type === 'hello') {
-    remoteName = String(data.value || 'Correspondant');
-    $('remoteLabel').textContent = remoteName;
-    $('remoteAvatar').textContent = remoteName[0] || '?';
-  }
-  if (data.type === 'cam') {
-    remoteCamOn = !!data.value;
-    applyRemoteCam();
-  }
-  if (data.type === 'chat') addChatMsg(remoteName, data.value, false);
+  if (data.type === 'chat') addChatMsg('Correspondant', data.value, false);
   if (data.type === 'emoji') showFloatingEmoji(data.value);
+}
+
+// Le bouton conserve son libellé français et bascule entre qualité basse et équilibrée.
+async function toggleDataSaver() {
+  dataSaverEnabled = !dataSaverEnabled;
+  const label = $('dsLabel');
+  if (label) label.textContent = 'Mode basse connexion : ' + (dataSaverEnabled ? 'ON' : 'OFF');
+  await setQuality(dataSaverEnabled ? 'low' : 'medium');
 }
 
 // ---- Menu qualité ----
@@ -870,79 +599,12 @@ async function switchDevice(kind) {
   }
 }
 
-// ---- Caméra avant / arrière (mobile) ----
-let facing = 'user';
-async function flipCamera() {
-  $('menu').classList.remove('show');
-  if (!localStream || !localStream.getVideoTracks()[0]) {
-    return alert('Active d\'abord la caméra (mode audio uniquement).');
-  }
-  const next = facing === 'user' ? 'environment' : 'user';
-  const p = QUALITY_PRESETS[quality] || QUALITY_PRESETS.low;
-  const old = localStream.getVideoTracks()[0];
-  try {
-    old.stop(); // un mobile ne peut souvent pas ouvrir deux caméras à la fois
-    const s = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: { ideal: next },
-        width: { ideal: p.width || 160 },
-        height: { ideal: p.height || 120 },
-        frameRate: { ideal: p.fps || 10, max: p.fps || 10 }
-      }
-    });
-    const t = s.getVideoTracks()[0];
-    t.enabled = isCamOn;
-    if (currentCall) {
-      const sender = currentCall.peerConnection.getSenders()
-        .find(x => x.track && x.track.kind === 'video');
-      if (sender) await sender.replaceTrack(t);
-    }
-    localStream.removeTrack(old);
-    localStream.addTrack(t);
-    $('local').srcObject = localStream;
-    facing = next;
-  } catch (e) {
-    console.error(e);
-    await replaceVideoTrack(quality);   // on récupère la caméra précédente
-    alert('Impossible de changer de caméra.');
-  }
-}
-
-// ---- Garder l'écran allumé pendant l'appel (mobile) ----
-let wakeLock = null;
-async function keepAwake() {
-  try {
-    if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
-  } catch (e) {}
-}
-function releaseAwake() {
-  try { if (wakeLock) wakeLock.release(); } catch (e) {}
-  wakeLock = null;
-}
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && peer) keepAwake();
-});
-
 // ---- Quitter ----
 function hangup() {
-  clearTimeout(joinTimer);
-  clearTimeout(openTimer);
-  clearTimeout(discTimer);
-  usingRelay = false;
-  redials = 0;
+  clearConnectionTimers();
+  iceRestartAttempted = false;
   if (currentCall) currentCall.close();
-  if (dataConn) dataConn.close();
   if (peer) peer.destroy();
-  dataConn = null;
-  isHost = false;
-  remoteName = 'Correspondant';
-  remoteCamOn = true;
-  clearInterval(frameTimer);
-  remoteFrameOk = false;
-  if ($('unmuteBtn')) $('unmuteBtn').remove();
-  $('remoteLabel').textContent = 'En attente…';
-  $('remoteAvatar').textContent = '?';
-  $('remoteAvatar').style.display = 'flex';
   if (localStream) localStream.getTracks().forEach(t => t.stop());
   if (screenStream) screenStream.getTracks().forEach(t => t.stop());
 
@@ -953,6 +615,7 @@ function hangup() {
   isScreenSharing = false;
   isMicOn = true;
   isCamOn = true;
+  roomHost = false;
 
   $('local').srcObject = null;
   $('remote').srcObject = null;
@@ -964,34 +627,11 @@ function hangup() {
   $('btnCam').classList.remove('off');
   $('local').style.display = 'block';
 
-  releaseAwake();
+  setConnectionMessage('');
 }
 
 // ============================================================
 // DÉMARRAGE
 // ============================================================
-window.addEventListener('DOMContentLoaded', () => {
-  // Pré-remplir le pseudo mémorisé
-  try {
-    const saved = localStorage.getItem('pliPseudo');
-    if (saved && !$('name').value) $('name').value = saved;
-  } catch (e) {}
+// Aucun accès caméra demandé au chargement : il est demandé uniquement à l'entrée en appel.
 
-  // Adapter l'interface à l'appareil
-  const isTouch = window.matchMedia('(pointer: coarse)').matches;
-  const hide = (id) => { const el = $(id); if (el) el.style.display = 'none'; };
-  if (!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia)) {
-    hide('btnScreen');                           // pas de partage d'écran sur mobile
-  }
-  if (!document.documentElement.requestFullscreen) {
-    hide('btnFull');                             // iPhone / Safari
-  }
-  if (isTouch) {
-    const flip = $('btnFlip');
-    if (flip) flip.classList.remove('hidden');   // caméra avant/arrière
-    hide('btnPickCam');                          // sélecteur par prompt() peu adapté au tactile
-    hide('btnPickMic');
-  }
-  // L'aperçu caméra à l'accueil n'est plus lancé : il allumait la caméra
-  // (et demandait l'autorisation) avant même de rejoindre un appel.
-});
