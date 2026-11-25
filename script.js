@@ -9,6 +9,8 @@ let joinTimer = null;
 let openTimer = null;
 let peerOpened = false;
 let usingRelay = false;
+let redials = 0;
+let discTimer = null;
 const dbgLines = [];
 let isHost = false;
 let myName = 'Anonyme';
@@ -153,6 +155,7 @@ async function enterCall() {
     localStream = await getLocalMedia();
     $('local').srcObject = localStream;
     $('selfAvatar').style.display = 'none';
+    dbg('Micro/caméra OK (' + localStream.getTracks().map(t => t.kind).join('+') + ')');
     keepAwake();
 
     // Détecter une caméra qui ne renvoie aucune image (déjà utilisée ailleurs, masquée…)
@@ -199,15 +202,40 @@ function dbg(msg) {
   if (dbgLines.length > 80) dbgLines.shift();
   console.log('[pli]', msg);
 }
-async function showDiag() {
-  $('menu').classList.remove('show');
-  const text = 'Pli Call — ' + (isHost ? 'hôte' : 'invité') + ' — ' + navigator.userAgent + '\n' + dbgLines.join('\n');
-  try {
-    await navigator.clipboard.writeText(text);
-    alert('Diagnostic copié, colle-le dans la discussion.\n\n' + dbgLines.slice(-12).join('\n'));
-  } catch (e) {
-    alert(dbgLines.slice(-15).join('\n'));
+// Affiche le diagnostic en plein écran (lisible, photographiable : pas besoin de copier-coller)
+function showDiag() {
+  const menu = $('menu'); if (menu) menu.classList.remove('show');
+  const count = (s) => dbgLines.filter(l => l.includes(s)).length;
+  const lastIce = [...dbgLines].reverse().find(l => l.includes('ICE :')) || '—';
+  const summary =
+    'RÉSUMÉ\n' +
+    'Rôle : ' + (isHost ? 'hôte' : 'invité') + ' · mode : ' + (usingRelay ? 'relais seul' : 'automatique') + '\n' +
+    'Serveur de mise en relation joint : ' + (peerOpened ? 'oui' : 'NON') + '\n' +
+    'Candidats → host : ' + count('candidat host') + ' · srflx : ' + count('candidat srflx') +
+    ' · relay : ' + count('candidat relay') + '\n' +
+    'Erreurs serveurs STUN/TURN : ' + count('erreur serveur') + '\n' +
+    'Dernier état ICE : ' + lastIce.replace(/^\S+\s/, '') + '\n' +
+    'Navigateur : ' + navigator.userAgent + '\n\n' +
+    'JOURNAL\n';
+
+  let p = $('diagPanel');
+  if (!p) {
+    p = document.createElement('div');
+    p.id = 'diagPanel';
+    p.style.cssText = 'position:fixed;inset:0;z-index:500;background:#101114;color:#e8eaed;' +
+      'font:13px/1.5 ui-monospace,Consolas,monospace;padding:56px 16px 16px;overflow:auto;' +
+      'white-space:pre-wrap;word-break:break-word;';
+    const close = document.createElement('button');
+    close.textContent = '✕ Fermer';
+    close.style.cssText = 'position:fixed;top:10px;right:10px;z-index:501;';
+    close.onclick = () => { p.style.display = 'none'; close.style.display = 'none'; };
+    p._close = close;
+    document.body.appendChild(p);
+    document.body.appendChild(close);
   }
+  p.textContent = summary + (dbgLines.length ? dbgLines.join('\n') : '(rien d\'enregistré pour l\'instant : essaie de rejoindre une réunion d\'abord)');
+  p.style.display = 'block';
+  p._close.style.display = 'inline-flex';
 }
 
 // Crée (ou recrée) la connexion au serveur de mise en relation.
@@ -325,6 +353,28 @@ function retryWithRelay() {
   startPeer(true);
 }
 
+// Invité : relance l'appel (et le canal de chat) vers l'hôte après une coupure, 3 essais max
+function redial() {
+  if (isHost || !peer || peer.destroyed || !localStream) return;
+  if (redials >= 3) {
+    dbg('Reconnexion impossible après 3 essais');
+    $('remoteLabel').textContent = 'Connexion impossible. Quitte et rejoins à nouveau.';
+    return;
+  }
+  redials++;
+  dbg('Reconnexion automatique (' + redials + '/3)');
+  const hostId = 'pli-' + roomCode;
+  if (currentCall) { currentCall._ignoreClose = true; try { currentCall.close(); } catch (e) {} }
+  try { if (dataConn) dataConn.close(); } catch (e) {}
+  $('remoteLabel').textContent = 'Reconnexion…';
+  $('remote').srcObject = null;
+  setupData(peer.connect(hostId, { reliable: true }));
+  const call = peer.call(hostId, localStream);
+  if (!call) return;
+  currentCall = call;
+  attachRemote(call);
+}
+
 function connectToHost(hostId) {
   // Pas de flux après 10 s → on bascule sur le relais ; puis message clair si ça échoue encore
   clearTimeout(joinTimer);
@@ -364,32 +414,60 @@ function attachRemote(call) {
       const s = pc.iceConnectionState;
       dbg('ICE : ' + s);
       if (call._ignoreClose) return;
+      clearTimeout(discTimer);
       if (s === 'checking') $('remoteLabel').textContent = 'Connexion en cours…';
-      if (s === 'connected' || s === 'completed') $('remoteLabel').textContent = remoteName;
-      if (s === 'disconnected') $('remoteLabel').textContent = 'Connexion instable…';
+      if (s === 'connected' || s === 'completed') {
+        $('remoteLabel').textContent = remoteName;
+        redials = 0;
+      }
+      if (s === 'disconnected') {
+        $('remoteLabel').textContent = 'Connexion instable…';
+        // Si ça ne revient pas tout seul en 6 s, l'invité relance l'appel
+        discTimer = setTimeout(() => {
+          if (call._ignoreClose || isHost) return;
+          if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+            usingRelay ? redial() : retryWithRelay();
+          }
+        }, 6000);
+      }
       if (s === 'failed') {
-        if (!isHost && !usingRelay) return retryWithRelay();
-        $('remoteLabel').textContent = 'Échec : réseau bloqué entre vous deux';
-        try { pc.restartIce(); } catch (e) {}
+        if (isHost) { $('remoteLabel').textContent = 'Connexion perdue, en attente de l\'autre personne…'; return; }
+        return usingRelay ? redial() : retryWithRelay();
       }
     });
   }
 
   call.on('stream', (remoteStream) => {
     const v = $('remote');
+    // PeerJS émet cet évènement une fois par piste (audio + vidéo) avec le même flux :
+    // ne pas le réassigner, sinon la lecture en cours est interrompue.
+    if (v.srcObject === remoteStream) { applyRemoteCam(); return; }
     v.srcObject = remoteStream;
-    applyRemoteCam();
     $('remoteLabel').textContent = remoteName;
-    // Forcer la lecture (certains navigateurs bloquent l'autoplay avec son)
+    dbg('Flux de l\'autre personne reçu (' + remoteStream.getTracks().map(t => t.kind).join('+') + ')');
+    v.style.display = 'block';
+    remoteFrameOk = false;
+    applyRemoteCam();
+    watchRemoteFrames();
+    // Lecture : si le navigateur refuse le son sans clic (NotAllowedError), on lance l'image
+    // en muet et on affiche un vrai bouton « Activer le son » (visible, sur PC comme mobile).
+    v.muted = false;
     const p = v.play();
-    if (p && p.catch) p.catch(() => {
-      $('remoteLabel').textContent = 'Touche l\'écran pour activer le son';
-      document.addEventListener('click', () => v.play(), { once: true });
+    if (p && p.catch) p.catch((err) => {
+      dbg('lecture : ' + (err && err.name));
+      if (err && err.name === 'NotAllowedError') {
+        v.muted = true;
+        v.play().catch(() => {});
+        showUnmuteButton(v);
+      }
     });
   });
   call.on('close', () => {
     if (call._ignoreClose) return;
     dbg('Appel terminé');
+    clearInterval(frameTimer);
+    remoteFrameOk = false;
+    if ($('unmuteBtn')) $('unmuteBtn').remove();
     $('remote').srcObject = null;
     $('remote').style.display = 'none';
     $('remoteAvatar').style.display = 'flex';
@@ -427,9 +505,53 @@ let remoteCamOn = true;
 function sendCamState() {
   if (dataConn && dataConn.open) dataConn.send({ type: 'cam', value: isCamOn });
 }
+// On montre l'image seulement si l'autre a sa caméra allumée ET que des images arrivent vraiment.
+// Sinon (caméra coupée, absente, ou image toute noire) : avatar. Ça ne dépend plus du seul
+// message « cam », qui n'arrive pas si le canal de données n'a pas pu s'ouvrir.
+let remoteFrameOk = false;
+let frameTimer = null;
 function applyRemoteCam() {
-  $('remote').style.display = remoteCamOn ? 'block' : 'none';
-  $('remoteAvatar').style.display = remoteCamOn ? 'none' : 'flex';
+  const show = remoteCamOn && remoteFrameOk;
+  $('remoteAvatar').style.display = show ? 'none' : 'flex';
+}
+function watchRemoteFrames() {
+  clearInterval(frameTimer);
+  const v = $('remote');
+  let canvas, ctx, dark = 0;
+  try {
+    canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 8;
+    ctx = canvas.getContext('2d', { willReadFrequently: true });
+  } catch (e) { ctx = null; }
+  frameTimer = setInterval(() => {
+    let ok;
+    try {
+      if (!(v.videoWidth > 0 && v.readyState >= 2)) ok = false;       // aucune image reçue
+      else if (!ctx) ok = true;                                        // pas de canvas : on fait confiance
+      else {
+        ctx.drawImage(v, 0, 0, 8, 8);
+        const d = ctx.getImageData(0, 0, 8, 8).data;
+        let sum = 0;
+        for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+        ok = sum > 64 * 3 * 2;                                         // pas entièrement noir
+      }
+    } catch (e) { ok = true; }
+    if (ok) { dark = 0; if (!remoteFrameOk) { remoteFrameOk = true; applyRemoteCam(); } }
+    else if (++dark >= 3 && remoteFrameOk) { remoteFrameOk = false; applyRemoteCam(); }
+  }, 1000);
+}
+
+function showUnmuteButton(v) {
+  let b = $('unmuteBtn');
+  if (!b) {
+    b = document.createElement('button');
+    b.id = 'unmuteBtn';
+    b.className = 'primary';
+    b.textContent = '🔊 Activer le son';
+    b.style.cssText = 'position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:6;';
+    b.onclick = () => { v.muted = false; v.play().catch(() => {}); b.remove(); };
+    $('remoteTile').appendChild(b);
+  }
 }
 
 // ---- Changement de qualité en direct ----
@@ -805,7 +927,9 @@ document.addEventListener('visibilitychange', () => {
 function hangup() {
   clearTimeout(joinTimer);
   clearTimeout(openTimer);
+  clearTimeout(discTimer);
   usingRelay = false;
+  redials = 0;
   if (currentCall) currentCall.close();
   if (dataConn) dataConn.close();
   if (peer) peer.destroy();
@@ -813,6 +937,9 @@ function hangup() {
   isHost = false;
   remoteName = 'Correspondant';
   remoteCamOn = true;
+  clearInterval(frameTimer);
+  remoteFrameOk = false;
+  if ($('unmuteBtn')) $('unmuteBtn').remove();
   $('remoteLabel').textContent = 'En attente…';
   $('remoteAvatar').textContent = '?';
   $('remoteAvatar').style.display = 'flex';
